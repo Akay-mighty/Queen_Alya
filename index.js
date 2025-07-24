@@ -40,6 +40,19 @@ const PORT = process.env.PORT || 3000;
 
 // Variables for update checking
 let updateAvailable = false;
+let isCheckingUpdates = false;
+
+// Files and directories to exclude from update checks
+const EXCLUDED_FILES = [
+    'package-lock.json',
+    '.gitignore',
+    '.git',
+    'session', // Entire session directory
+    'lib/store.db',
+    'lib/store.db-shm',
+    'lib/store.db-wal',
+    'node_modules'
+];
 
 // Config watcher and cache
 let greetingEnabled = config.GREETING;
@@ -56,7 +69,7 @@ fileWatcher.watchFile(configPath, (eventType, path) => {
     }
 });
 
-// Function to recursively get all files in a directory
+// Function to recursively get all files in a directory (with exclusions)
 async function getAllFiles(dirPath) {
     const arrayOfFiles = [];
     
@@ -64,15 +77,24 @@ async function getAllFiles(dirPath) {
         const files = fs.readdirSync(currentPath);
 
         for (const file of files) {
-            if (file === "node_modules" || file === "package-lock.json" || file === ".gitignore" || file === ".git") continue;
-            
             const fullPath = path.join(currentPath, file);
+            const relativePath = path.relative(__dirname, fullPath);
+            
+            // Skip excluded files/directories
+            if (EXCLUDED_FILES.some(excluded => 
+                relativePath.startsWith(excluded) || 
+                file === excluded ||
+                relativePath.includes(excluded)
+            )) {
+                continue;
+            }
+            
             if (fs.statSync(fullPath).isDirectory()) {
                 await readDirectory(fullPath);
             } else {
                 arrayOfFiles.push({
                     path: fullPath,
-                    relativePath: path.relative(__dirname, fullPath)
+                    relativePath: relativePath
                 });
             }
         }
@@ -109,12 +131,15 @@ async function getGitHubFileContent(filePath) {
     }
 }
 
-// Function to check for repository updates by comparing all files
+// Improved update check that runs in background
 async function checkForUpdates() {
+    if (isCheckingUpdates) return false;
+    isCheckingUpdates = true;
+    
     try {
-        console.log("Checking for updates...");
+        console.log("Checking for updates in background...");
         
-        // Get all local files
+        // Get all local files (excluding session and db files)
         const localFiles = await getAllFiles(__dirname);
         
         // Check each file against GitHub
@@ -124,8 +149,7 @@ async function checkForUpdates() {
             const githubContent = await getGitHubFileContent(file.relativePath);
             
             if (githubContent === null) {
-                console.log(`File ${file.relativePath} not found in GitHub repo`);
-                differencesFound = true;
+                // Skip if file is not found in GitHub but is expected to be local-only
                 continue;
             }
             
@@ -152,6 +176,8 @@ async function checkForUpdates() {
     } catch (error) {
         console.error('Error checking for updates:', error.message);
         return false;
+    } finally {
+        isCheckingUpdates = false;
     }
 }
 
@@ -453,9 +479,7 @@ async function logMessage(serializedMsg) {
 
 async function startBot() {
     try {
-        // Check for updates once at startup
-        await checkForUpdates();
-
+        // Start the bot immediately without waiting for update check
         const sessionId = config.SESSION_ID;
         let hasValidCreds = await hasValidLocalSession();
 
@@ -623,6 +647,13 @@ async function startBot() {
                 await setupAntidelete(sock);
                 await setupStatusSaver(sock);
                 await setupAntiCall(sock);
+                
+                // Run update check in background after successful connection
+                setTimeout(() => {
+                    checkForUpdates().catch(err => {
+                        console.error('Background update check failed:', err);
+                    });
+                }, 30000); // Wait 30 seconds before checking
             }
         });
 
@@ -691,6 +722,16 @@ async function startBot() {
     }
 }
 
+// Start the bot immediately
 startBot().catch(err => {
     console.error("Error starting bot:", err.message);
 });
+
+// Initialize update check interval (every 6 hours)
+setInterval(() => {
+    if (sock && sock.user?.id) {
+        checkForUpdates().catch(err => {
+            console.error('Periodic update check failed:', err);
+        });
+    }
+}, 6 * 60 * 60 * 1000);
