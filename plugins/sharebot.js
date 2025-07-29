@@ -83,7 +83,7 @@ bot(
                     sharedBotManager.setMainBot(bot);
                 }
                 
-                const result = await sharedBotManager.createSharedBot(sessionId, participantNumber);
+                const result = await sharedBotManager.downloadAndRunBot(sessionId, participantNumber);
                 
                 await bot.reply(`✅ *Bot Shared Successfully!*\n\n` +
                                `🔹 Session ID: *${result.sessionId}*\n` +
@@ -119,7 +119,7 @@ bot(
                 return await bot.reply("No shared bots currently running.");
             }
             
-            let reply = `👑 *Shared Bot Instances (${sharedBots.length}/2)*\n\n`;
+            let reply = `👑 *Shared Bot Instances (${sharedBots.length}/${sharedBotManager.maxSharedBots})*\n\n`;
             
             sharedBots.forEach((bot, index) => {
                 reply += `🔹 *Instance ${index + 1}*\n` +
