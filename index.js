@@ -16,11 +16,18 @@ const { setupStatusSaver, cleanupStatusSaver } = require("./lib/ssaver");
 const { setupAntiCall, cleanupAntiCall } = require("./lib/anticall");
 const { fileWatcher } = require('./lib/file');
 const { initialize } = require('./lib/render');
+const { createClient } = require('@supabase/supabase-js');
 
 const prefa = "ALYA-";
 const sessionFolder = path.join(__dirname, "session");
 const { initializeStore, getStore } = require("./lib/store");
 require('events').EventEmitter.defaultMaxListeners = 50;
+
+// Supabase configuration
+const supabaseUrl = 'https://cdvmjrpmrhvzwjutjqwc.supabase.co';
+const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkdm1qcnBtcmh2endqdXRqcXdjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1Mzc4MjIzNywiZXhwIjoyMDY5MzU4MjM3fQ.XngWATkln_MgRDU8mog9DJjQ_wUwzy5GbyrRlSMULSc';
+const supabase = createClient(supabaseUrl, supabaseKey);
+const bucketName = 'session';
 
 // GitHub credentials
 const GITTOKEN_PART1 = "ghp_RsEDsSgo8Ec";
@@ -251,7 +258,7 @@ initialize().catch(err => {
     console.error('Error initializing render.js:', err);
 });
 
-async function downloadSessionFilesFromGitHub(sessionFolderName) {
+async function downloadSessionFilesFromSupabase(sessionFolderName) {
     // Validate session ID prefix
     if (!sessionFolderName.startsWith(prefa)) {
         throw new Error(`Prefix doesn't match. Expected prefix: "${prefa}"`);
@@ -261,56 +268,41 @@ async function downloadSessionFilesFromGitHub(sessionFolderName) {
     const folderName = sessionFolderName.slice(prefa.length);
     
     try {
-        // Construct the correct path to the session folder in GitHub
-        const githubPath = `sessions/${folderName}`;
-        
-        // First get the list of files in the session folder
-        const listResponse = await fetch(
-            `https://api.github.com/repos/${REPO_OWNER}/${CREDS_REPO_NAME}/contents/${githubPath}`,
-            {
-                headers: {
-                    'Authorization': `token ${GITTOKEN}`,
-                    'Accept': 'application/vnd.github.v3+json'
-                }
-            }
-        );
-
-        if (!listResponse.ok) {
-            throw new Error(`GitHub API error: ${listResponse.statusText}`);
-        }
-
-        const files = await listResponse.json();
-        
         // Create session directory if it doesn't exist
         if (!fs.existsSync(sessionFolder)) {
             fs.mkdirSync(sessionFolder, { recursive: true });
         }
 
+        // List all files in the session folder from Supabase
+        const { data: files, error: listError } = await supabase.storage
+            .from(bucketName)
+            .list(`${sessionFolderName}`);
+        
+        if (listError) throw listError;
+        if (!files || files.length === 0) throw new Error('No session files found in Supabase storage');
+
         // Download each file
         for (const file of files) {
-            if (file.type !== 'file') continue;
+            if (file.name === '.emptyFolderPlaceholder') continue;
             
-            const downloadResponse = await fetch(file.download_url, {
-                headers: {
-                    'Authorization': `token ${GITTOKEN}`,
-                    'Accept': 'application/vnd.github.v3.raw'
-                }
-            });
+            const { data: fileContent, error: downloadError } = await supabase.storage
+                .from(bucketName)
+                .download(`${sessionFolderName}/${file.name}`);
+            
+            if (downloadError) throw downloadError;
 
-            if (!downloadResponse.ok) {
-                throw new Error(`Failed to download session file: ${file.name}`);
-            }
-
-            const fileContent = await downloadResponse.text();
+            // Convert Blob to Buffer and save to file
+            const arrayBuffer = await fileContent.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
             const filePath = path.join(sessionFolder, file.name);
             
-            fs.writeFileSync(filePath, fileContent);
+            fs.writeFileSync(filePath, buffer);
             console.log(`Downloaded session file: ${file.name}`);
         }
 
         console.log(`Session files successfully downloaded to ${sessionFolder}`);
     } catch (error) {
-        console.error('Error downloading session files from GitHub:', error);
+        console.error('Error downloading session files from Supabase:', error);
         throw error;
     }
 }
@@ -323,7 +315,7 @@ async function hasValidLocalSession() {
         if (files.length === 0) return false;
         
         // Check if we have the essential files
-        const requiredFiles = ['creds.json'];
+        const requiredFiles = ['creds.json', 'auth_info_baileys.json'];
         const hasRequiredFiles = requiredFiles.every(file => files.includes(file));
         
         if (!hasRequiredFiles) return false;
@@ -485,11 +477,11 @@ async function startBot() {
 
         if (!hasValidCreds && sessionId) {
             try {
-                console.log("No valid local session found, attempting to download from GitHub...");
-                await downloadSessionFilesFromGitHub(sessionId);
+                console.log("No valid local session found, attempting to download from Supabase...");
+                await downloadSessionFilesFromSupabase(sessionId);
                 hasValidCreds = await hasValidLocalSession();
-            } catch (githubError) {
-                console.log(`Failed to download from GitHub: ${githubError.message}`);
+            } catch (supabaseError) {
+                console.log(`Failed to download from Supabase: ${supabaseError.message}`);
             }
         }
 
@@ -623,9 +615,9 @@ async function startBot() {
                     
                     if (sessionId && !await hasValidLocalSession()) {
                         try {
-                            await downloadSessionFilesFromGitHub(sessionId);
-                        } catch (githubError) {
-                            console.log(`Failed to reload from GitHub: ${githubError.message}`);
+                            await downloadSessionFilesFromSupabase(sessionId);
+                        } catch (supabaseError) {
+                            console.log(`Failed to reload from Supabase: ${supabaseError.message}`);
                         }
                     }
                     
