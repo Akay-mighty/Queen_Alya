@@ -315,7 +315,7 @@ async function hasValidLocalSession() {
         if (files.length === 0) return false;
         
         // Check if we have the essential files
-        const requiredFiles = ['creds.json', 'auth_info_baileys.json'];
+        const requiredFiles = ['creds.json'];
         const hasRequiredFiles = requiredFiles.every(file => files.includes(file));
         
         if (!hasRequiredFiles) return false;
