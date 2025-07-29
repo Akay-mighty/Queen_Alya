@@ -21,7 +21,7 @@ const { createClient } = require('@supabase/supabase-js');
 const prefa = "ALYA-";
 const sessionFolder = path.join(__dirname, "session");
 const { initializeStore, getStore } = require("./lib/store");
-require('events').EventEmitter.defaultMaxListeners = 50;
+require('events').EventEmitter.defaultMaxListeners = 100;
 
 // Supabase configuration
 const supabaseUrl = 'https://cdvmjrpmrhvzwjutjqwc.supabase.co';
