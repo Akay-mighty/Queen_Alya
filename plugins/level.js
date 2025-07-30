@@ -1,6 +1,42 @@
 const bot = require("../lib/plugin");
 const Levels = require("discord-xp");
 const config = require("../config");
+const fs = require('fs');
+const path = require('path');
+
+// Level system state
+const levelState = {
+    configFile: path.join(__dirname, '..', 'config.js'),
+    levelSystemEnabled: config.LEVEL_UP === "true"
+};
+
+// File watcher to reload config changes
+fs.watch(levelState.configFile, (eventType, filename) => {
+    if (eventType === 'change') {
+        try {
+            delete require.cache[require.resolve(levelState.configFile)];
+            const newConfig = require(levelState.configFile);
+            levelState.levelSystemEnabled = newConfig.LEVEL_UP === "true";
+        } catch (error) {
+            console.error('Level: Error reloading config:', error);
+        }
+    }
+});
+
+// Function to update config
+function updateConfig(newValues) {
+    try {
+        const config = require(levelState.configFile);
+        const updatedConfig = {...config, ...newValues};
+        fs.writeFileSync(levelState.configFile, `module.exports = ${JSON.stringify(updatedConfig, null, 2)};`);
+        delete require.cache[require.resolve(levelState.configFile)];
+        levelState.levelSystemEnabled = updatedConfig.LEVEL_UP === "true";
+        return true;
+    } catch (error) {
+        console.error('Level: Error updating config:', error);
+        return false;
+    }
+}
 
 // Initialize MongoDB connection if configured
 if (config.MONGODB) {
@@ -47,8 +83,49 @@ function getRole(level) {
     return "GOD✨";
 }
 
-// Level system toggle
-let levelSystemEnabled = true;
+// Calculate XP based on message count (1 XP per message)
+async function calculateXP(userId, chatId) {
+    try {
+        const chatHistory = await store.getChatHistory(chatId);
+        if (!chatHistory?.length) return 0;
+
+        let messageCount = 0;
+        for (const entry of chatHistory) {
+            try {
+                const msg = JSON.parse(entry.message);
+                const participant = msg.key?.participant || msg.key?.remoteJid;
+                if (participant === userId) {
+                    messageCount++;
+                }
+            } catch (e) {
+                console.error('Message parse error:', e);
+            }
+        }
+        return messageCount;
+    } catch (error) {
+        console.error('Error calculating XP:', error);
+        return 0;
+    }
+}
+
+// Get user name with fallbacks
+async function getUserName(userId, pushName) {
+    try {
+        return pushName || (await store.getname(userId)) || userId.split('@')[0];
+    } catch {
+        return userId.split('@')[0];
+    }
+}
+
+// Get user bio
+async function getUserBio(userId) {
+    try {
+        const statusData = await bot.sock.fetchStatus(userId);
+        return statusData?.[0]?.status?.status || "No bio set";
+    } catch {
+        return "No bio set";
+    }
+}
 
 bot(
     {
@@ -72,29 +149,37 @@ bot(
 
         switch (action.toLowerCase()) {
             case 'on':
-                levelSystemEnabled = true;
-                return await bot.reply("Level system has been enabled.");
+                const onSuccess = updateConfig({ LEVEL_UP: "true" });
+                if (onSuccess) {
+                    return await bot.reply("Level system has been enabled.");
+                } else {
+                    return await bot.reply("Failed to enable level system.");
+                }
                 
             case 'off':
-                levelSystemEnabled = false;
-                return await bot.reply("Level system has been disabled.");
+                const offSuccess = updateConfig({ LEVEL_UP: "false" });
+                if (offSuccess) {
+                    return await bot.reply("Level system has been disabled.");
+                } else {
+                    return await bot.reply("Failed to disable level system.");
+                }
                 
             case 'profile':
                 const profileUser = message.mentionedJid?.[0] || message.sender;
                 try {
-                    const user = await Levels.fetch(profileUser, "RandomXP");
-                    const bio = await bot.sock.fetchStatus(profileUser).catch(() => ({ status: "No bio set" }));
-                    const name = await store.getname(profileUser) || profileUser.split('@')[0];
-                    const role = getRole(user.level);
-                    const totalMessages = Math.floor(user.xp / 8);
+                    const user = await Levels.fetch(profileUser, message.chat);
+                    const name = await getUserName(profileUser, message.pushName);
+                    const bio = await getUserBio(profileUser);
+                    const role = getRole(user?.level || 0);
+                    const totalMessages = user?.xp || 0;
 
                     const profile = `
 *Hii ${name},*
 *Here is your profile information*
 *👤Username:* ${name}
-*⚡Bio:* ${bio.status}
+*⚡Bio:* ${bio}
 *🧩Role:* ${role}
-*🍁Level:* ${user.level}
+*🍁Level:* ${user?.level || 0}
 *📥Total Messages:* ${totalMessages}
 *Powered by ${config.BOT_NAME}*
 `;
@@ -116,16 +201,16 @@ bot(
             case 'rank':
                 const rankUser = message.mentionedJid?.[0] || message.sender;
                 try {
-                    const user = await Levels.fetch(rankUser, "RandomXP");
-                    const name = await store.getname(rankUser) || rankUser.split('@')[0];
-                    const role = getRole(user.level);
+                    const user = await Levels.fetch(rankUser, message.chat);
+                    const name = await getUserName(rankUser, message.pushName);
+                    const role = getRole(user?.level || 0);
                     const disc = rankUser.substring(3, 7);
-                    const totalMessages = Math.floor(user.xp / 8);
+                    const totalMessages = user?.xp || 0;
 
                     const rankText = `*Hii ${config.BOT_NAME},🌟 ${name}∆${disc}'s* Exp\n\n` +
                         `*🌟Role*: ${role}\n` +
-                        `*🟢Exp*: ${user.xp} / ${Levels.xpFor(user.level + 1)}\n` +
-                        `*🏡Level*: ${user.level}\n` +
+                        `*🟢Exp*: ${user?.xp || 0} / ${Levels.xpFor((user?.level || 0) + 1)}\n` +
+                        `*🏡Level*: ${user?.level || 0}\n` +
                         `*Total Messages*: ${totalMessages}`;
 
                     try {
@@ -145,14 +230,14 @@ bot(
             case 'leaderboard':
             case 'deck':
                 try {
-                    const leaderboard = await Levels.fetchLeaderboard("RandomXP", 5);
+                    const leaderboard = await Levels.fetchLeaderboard(message.chat, 5);
                     let leaderboardText = `*----● LeaderBoard ● ----*\n\n`;
 
                     for (let i = 0; i < leaderboard.length; i++) {
                         const user = leaderboard[i];
-                        const name = await store.getname(user.userID) || user.userID.split('@')[0] || "Unknown";
+                        const name = await getUserName(user.userID, null);
                         const role = getRole(user.level);
-                        const totalMessages = Math.floor(user.xp / 8);
+                        const totalMessages = user.xp;
 
                         leaderboardText += `*${i + 1}●Name*: ${name}\n` +
                             `*●Level*: ${user.level}\n` +
@@ -188,27 +273,33 @@ bot(
     },
     async (message, bot) => {
         try {
-            if (!config.MONGODB || !levelSystemEnabled || message.key?.fromMe) return;
+            if (!config.MONGODB || !levelState.levelSystemEnabled || message.key?.fromMe) return;
             
-            const randomXp = 8;
-            const hasLeveledUp = await Levels.appendXp(message.sender, "RandomXP", randomXp);
+            // Calculate XP based on message count
+            const messageCount = await calculateXP(message.sender, message.chat);
+            const currentUser = await Levels.fetch(message.sender, message.chat);
             
-            if (hasLeveledUp) {
-                const user = await Levels.fetch(message.sender, "RandomXP");
-                const role = getRole(user.level);
-                const name = message.pushName || await store.getname(message.sender) || "User";
+            // Only update if the calculated XP is higher than current XP
+            if (!currentUser || messageCount > currentUser.xp) {
+                const hasLeveledUp = await Levels.setXp(message.sender, message.chat, messageCount);
                 
-                await bot.sock.sendMessage(message.chat, {
-                    text: `╔════⪨\n` +
-                          `║ *Wow, Someone just*\n` +
-                          `║ *leveled Up huh⭐*\n` +
-                          `║ *👤Name*: ${name}\n` +
-                          `║ *🎐Level*: ${user.level}🍭\n` +
-                          `║ *🛑Exp*: ${user.xp} / ${Levels.xpFor(user.level + 1)}\n` +
-                          `║ *📍Role*: *${role}*\n` +
-                          `║ *Enjoy🥳*\n` +
-                          `╚════════════⪨`
-                }, { quoted: message });
+                if (hasLeveledUp) {
+                    const user = await Levels.fetch(message.sender, message.chat);
+                    const role = getRole(user.level);
+                    const name = await getUserName(message.sender, message.pushName);
+                    
+                    await bot.sock.sendMessage(message.chat, {
+                        text: `╔════⪨\n` +
+                              `║ *Wow, Someone just*\n` +
+                              `║ *leveled Up huh⭐*\n` +
+                              `║ *👤Name*: ${name}\n` +
+                              `║ *🎐Level*: ${user.level}🍭\n` +
+                              `║ *🛑Exp*: ${user.xp} / ${Levels.xpFor(user.level + 1)}\n` +
+                              `║ *📍Role*: *${role}*\n` +
+                              `║ *Enjoy🥳*\n` +
+                              `╚════════════⪨`
+                    }, { quoted: message });
+                }
             }
         } catch (error) {
             console.error('Level listener error:', error);
