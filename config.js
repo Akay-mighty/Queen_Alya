@@ -26,6 +26,7 @@ const config = {
   GREETING: "false" || process.env.GREETING,
   MENUTYPE: "v2" || process.env.MENUTYPE,
   MENU_URLS: "https://files.catbox.moe/55f24l.jpg;https://files.catbox.moe/1p2yqo.png;https://files.catbox.moe/tgpgwn.png;https://files.catbox.moe/1y1lnl.jpg;https://files.catbox.moe/r85hmq.jpg;https://files.catbox.moe/vmid29.jpg;https://files.catbox.moe/pqijxi.mp4;https://files.catbox.moe/ycg4un.mp4;https://files.catbox.moe/c1a27a.mp4;https://files.catbox.moe/pq3345.mp4" || process.env.MENU_URLS,
+  LEVEL_UP: "true" || process.env.LEVEL_UP,
   LINK_DELETE: "true" || process.env.LINK_DELETE,
   AFK: "false" || process.env.AFK,
   AFK_REASON: "I'm off playing toram cya later" || process.env.AFK_REASON,
