@@ -56,8 +56,8 @@ const LEVEL_ROLES = {
     10: "🧚🏻Baby Mage",
     12: "🧜Mage",
     14: "🧜‍♂️Master of Mage",
-    16: "🌬Child of Nobel",
-    18: "❄Nobel",
+    16: "🌬Child of Noble",
+    18: "❄Noble",
     20: "⚡Speed of Elite",
     22: "🎭Elite",
     24: "🥇Ace I",
@@ -77,9 +77,22 @@ const LEVEL_ROLES = {
 
 // Helper function to get role based on level
 function getRole(level) {
-    for (const [maxLevel, role] of Object.entries(LEVEL_ROLES).sort((a, b) => b[0] - a[0])) {
-        if (level <= maxLevel) return role;
+    // Convert level to number if it's not already
+    level = Number(level);
+    
+    // Sort levels in descending order
+    const sortedLevels = Object.keys(LEVEL_ROLES)
+        .map(Number)
+        .sort((a, b) => b - a);
+    
+    // Find the highest level threshold that the user has reached
+    for (const threshold of sortedLevels) {
+        if (level >= threshold) {
+            return LEVEL_ROLES[threshold];
+        }
     }
+    
+    // Default role for levels below the first threshold
     return "GOD✨";
 }
 
@@ -93,6 +106,8 @@ async function calculateXP(userId, chatId) {
         for (const entry of chatHistory) {
             try {
                 const msg = JSON.parse(entry.message);
+                if (msg.key?.fromMe) continue;
+                
                 const participant = msg.key?.participant || msg.key?.remoteJid;
                 if (participant === userId) {
                     messageCount++;
