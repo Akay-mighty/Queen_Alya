@@ -93,6 +93,19 @@ function getRole(level) {
     return "GOD✨";
 }
 
+// Improved message parsing function
+function parseMessageEntry(entry) {
+    try {
+        if (typeof entry.message === 'string') {
+            return JSON.parse(entry.message);
+        }
+        return entry.message;
+    } catch (e) {
+        console.error('Message parse error:', e);
+        return null;
+    }
+}
+
 // Calculate XP based on message count (1 XP per message)
 async function calculateXP(userId, chatId) {
     try {
@@ -101,16 +114,29 @@ async function calculateXP(userId, chatId) {
 
         let messageCount = 0;
         for (const entry of chatHistory) {
-            try {
-                const msg = JSON.parse(entry.message);
-                if (msg.key?.fromMe) continue;
-                
-                const participant = msg.key?.participant || msg.key?.remoteJid;
-                if (participant === userId) {
-                    messageCount++;
+            const msg = parseMessageEntry(entry);
+            if (!msg || msg.key?.fromMe) continue;
+            
+            // Extract participant correctly from different message formats
+            let participant;
+            if (msg.key?.participant) {
+                participant = msg.key.participant;
+            } else if (msg.key?.remoteJid) {
+                if (msg.key.remoteJid.endsWith('@g.us')) {
+                    // Group message without participant is from the group itself
+                    continue;
                 }
-            } catch (e) {
-                console.error('Message parse error:', e);
+                participant = msg.key.remoteJid;
+            } else {
+                continue;
+            }
+
+            // Normalize participant ID
+            participant = participant.split('@')[0] + '@s.whatsapp.net';
+            const targetUser = userId.split('@')[0] + '@s.whatsapp.net';
+
+            if (participant === targetUser) {
+                messageCount++;
             }
         }
         return messageCount;
@@ -120,10 +146,12 @@ async function calculateXP(userId, chatId) {
     }
 }
 
-// Get user name using store.getname only
+// Get user name 
 async function getUserName(userId) {
     try {
-        return await store.getname(userId) || userId.split('@')[0];
+        // Normalize user ID format
+        const normalizedId = userId.includes('@') ? userId : `${userId}@s.whatsapp.net`;
+        return await store.getname(normalizedId) || normalizedId.split('@')[0];
     } catch {
         return userId.split('@')[0];
     }
@@ -132,8 +160,9 @@ async function getUserName(userId) {
 // Get user bio
 async function getUserBio(userId) {
     try {
-        const statusData = await bot.sock.fetchStatus(userId);
-        return statusData?.[0]?.status?.status || "No bio set";
+        const normalizedId = userId.includes('@') ? userId : `${userId}@s.whatsapp.net`;
+        const statusData = await bot.sock.fetchStatus(normalizedId);
+        return statusData?.status || "No bio set";
     } catch {
         return "No bio set";
     }
@@ -159,26 +188,26 @@ bot(
         const query = message.query?.trim() || '';
         const [action, ...rest] = query.split(' ');
 
-        switch (action.toLowerCase()) {
-            case 'on':
-                const onSuccess = updateConfig({ LEVEL_UP: "true" });
-                if (onSuccess) {
-                    return await bot.reply("Level system has been enabled.");
-                } else {
-                    return await bot.reply("Failed to enable level system.");
-                }
-                
-            case 'off':
-                const offSuccess = updateConfig({ LEVEL_UP: "false" });
-                if (offSuccess) {
-                    return await bot.reply("Level system has been disabled.");
-                } else {
-                    return await bot.reply("Failed to disable level system.");
-                }
-                
-            case 'profile':
-                const profileUser = message.mentionedJid?.[0] || message.sender;
-                try {
+        try {
+            switch (action?.toLowerCase()) {
+                case 'on':
+                    const onSuccess = updateConfig({ LEVEL_UP: "true" });
+                    return await bot.reply(
+                        onSuccess 
+                            ? "Level system has been enabled." 
+                            : "Failed to enable level system."
+                    );
+                    
+                case 'off':
+                    const offSuccess = updateConfig({ LEVEL_UP: "false" });
+                    return await bot.reply(
+                        offSuccess 
+                            ? "Level system has been disabled." 
+                            : "Failed to disable level system."
+                    );
+                    
+                case 'profile':
+                    const profileUser = message.mentionedJid?.[0] || message.sender;
                     const messageCount = await calculateXP(profileUser, message.chat);
                     const currentLevel = Levels.getLevelFromXP(messageCount);
                     const name = await getUserName(profileUser);
@@ -197,7 +226,8 @@ bot(
 `;
 
                     try {
-                        const pfp = await bot.sock.profilePictureUrl(profileUser, "image");
+                        const normalizedId = profileUser.includes('@') ? profileUser : `${profileUser}@s.whatsapp.net`;
+                        const pfp = await bot.sock.profilePictureUrl(normalizedId, "image");
                         return await bot.sock.sendMessage(message.chat, { 
                             image: { url: pfp },
                             caption: profile 
@@ -205,28 +235,24 @@ bot(
                     } catch {
                         return await bot.reply(profile);
                     }
-                } catch (error) {
-                    console.error('Profile error:', error);
-                    return await bot.reply("Failed to fetch profile information.");
-                }
-                
-            case 'rank':
-                const rankUser = message.mentionedJid?.[0] || message.sender;
-                try {
-                    const messageCount = await calculateXP(rankUser, message.chat);
-                    const currentLevel = Levels.getLevelFromXP(messageCount);
-                    const name = await getUserName(rankUser);
-                    const role = getRole(currentLevel);
+                    
+                case 'rank':
+                    const rankUser = message.mentionedJid?.[0] || message.sender;
+                    const rankMessageCount = await calculateXP(rankUser, message.chat);
+                    const rankLevel = Levels.getLevelFromXP(rankMessageCount);
+                    const rankName = await getUserName(rankUser);
+                    const rankRole = getRole(rankLevel);
                     const disc = rankUser.substring(3, 7);
 
-                    const rankText = `*Hii ${config.BOT_NAME},🌟 ${name}∆${disc}'s* Exp\n\n` +
-                        `*🌟Role*: ${role}\n` +
-                        `*🟢Exp*: ${messageCount} / ${Levels.xpFor(currentLevel + 1)}\n` +
-                        `*🏡Level*: ${currentLevel}\n` +
-                        `*Total Messages*: ${messageCount}`;
+                    const rankText = `*Hii ${config.BOT_NAME},🌟 ${rankName}∆${disc}'s* Exp\n\n` +
+                        `*🌟Role*: ${rankRole}\n` +
+                        `*🟢Exp*: ${rankMessageCount} / ${Levels.xpFor(rankLevel + 1)}\n` +
+                        `*🏡Level*: ${rankLevel}\n` +
+                        `*Total Messages*: ${rankMessageCount}`;
 
                     try {
-                        const pfp = await bot.sock.profilePictureUrl(rankUser, "image");
+                        const normalizedId = rankUser.includes('@') ? rankUser : `${rankUser}@s.whatsapp.net`;
+                        const pfp = await bot.sock.profilePictureUrl(normalizedId, "image");
                         return await bot.sock.sendMessage(message.chat, { 
                             image: { url: pfp },
                             caption: rankText
@@ -234,14 +260,9 @@ bot(
                     } catch {
                         return await bot.reply(rankText);
                     }
-                } catch (error) {
-                    console.error('Rank error:', error);
-                    return await bot.reply("Failed to fetch rank information.");
-                }
-                
-            case 'leaderboard':
-            case 'deck':
-                try {
+                    
+                case 'leaderboard':
+                case 'deck':
                     const chatHistory = await store.getChatHistory(message.chat);
                     if (!chatHistory?.length) {
                         return await bot.reply("No message history available for this chat.");
@@ -249,54 +270,56 @@ bot(
 
                     const userActivity = {};
                     for (const entry of chatHistory) {
-                        try {
-                            const msg = JSON.parse(entry.message);
-                            if (msg.key?.fromMe) continue;
-                            const participant = msg.key?.participant || msg.key?.remoteJid;
-                            if (!participant) continue;
-                            userActivity[participant] = (userActivity[participant] || 0) + 1;
-                        } catch (e) {
-                            console.error('Message parse error:', e);
+                        const msg = parseMessageEntry(entry);
+                        if (!msg || msg.key?.fromMe) continue;
+                        
+                        let participant;
+                        if (msg.key?.participant) {
+                            participant = msg.key.participant;
+                        } else if (msg.key?.remoteJid && !msg.key.remoteJid.endsWith('@g.us')) {
+                            participant = msg.key.remoteJid;
+                        } else {
+                            continue;
                         }
+
+                        // Normalize participant ID
+                        participant = participant.split('@')[0] + '@s.whatsapp.net';
+                        userActivity[participant] = (userActivity[participant] || 0) + 1;
                     }
 
-                    const users = await Promise.all(
-                        Object.entries(userActivity)
-                            .sort((a, b) => b[1] - a[1])
-                            .slice(0, 5)
-                            .map(async ([id, count]) => {
-                                const name = await getUserName(id);
-                                const level = Levels.getLevelFromXP(count);
-                                const role = getRole(level);
-                                return { id, name, count, level, role };
-                            })
-                    );
+                    const sortedUsers = Object.entries(userActivity)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 5);
 
                     let leaderboardText = `*----● LeaderBoard ● ----*\n\n`;
-
-                    for (let i = 0; i < users.length; i++) {
-                        const user = users[i];
-                        leaderboardText += `*${i + 1}●Name*: ${user.name}\n` +
-                            `*●Level*: ${user.level}\n` +
-                            `*●Points*: ${user.count}\n` +
-                            `*●Role*: ${user.role}\n` +
-                            `*●Total messages*: ${user.count}\n\n`;
+                    
+                    for (let i = 0; i < sortedUsers.length; i++) {
+                        const [userId, count] = sortedUsers[i];
+                        const name = await getUserName(userId);
+                        const level = Levels.getLevelFromXP(count);
+                        const role = getRole(level);
+                        
+                        leaderboardText += `*${i + 1}●Name*: ${name}\n` +
+                            `*●Level*: ${level}\n` +
+                            `*●Points*: ${count}\n` +
+                            `*●Role*: ${role}\n` +
+                            `*●Total messages*: ${count}\n\n`;
                     }
 
                     return await bot.reply(leaderboardText);
-                } catch (error) {
-                    console.error('Leaderboard error:', error);
-                    return await bot.reply("Failed to fetch leaderboard.");
-                }
-                
-            default:
-                return await bot.reply(
-                    `*Level System Commands:*\n\n` +
-                    `${config.PREFIX}level on/off - Toggle level system\n` +
-                    `${config.PREFIX}level profile [@user] - Show profile\n` +
-                    `${config.PREFIX}level rank [@user] - Show rank\n` +
-                    `${config.PREFIX}level leaderboard - Show top users`
-                );
+                    
+                default:
+                    return await bot.reply(
+                        `*Level System Commands:*\n\n` +
+                        `${config.PREFIX}level on/off - Toggle level system\n` +
+                        `${config.PREFIX}level profile [@user] - Show profile\n` +
+                        `${config.PREFIX}level rank [@user] - Show rank\n` +
+                        `${config.PREFIX}level leaderboard - Show top users`
+                    );
+            }
+        } catch (error) {
+            console.error('Level command error:', error);
+            return await bot.reply("An error occurred while processing your request.");
         }
     }
 );
