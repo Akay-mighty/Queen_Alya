@@ -77,22 +77,19 @@ const LEVEL_ROLES = {
 
 // Helper function to get role based on level
 function getRole(level) {
-    // Convert level to number if it's not already
     level = Number(level);
+    if (level === 0) return "Newbie";
     
-    // Sort levels in descending order
     const sortedLevels = Object.keys(LEVEL_ROLES)
         .map(Number)
         .sort((a, b) => b - a);
     
-    // Find the highest level threshold that the user has reached
     for (const threshold of sortedLevels) {
         if (level >= threshold) {
             return LEVEL_ROLES[threshold];
         }
     }
     
-    // Default role for levels below the first threshold
     return "GOD✨";
 }
 
@@ -123,10 +120,10 @@ async function calculateXP(userId, chatId) {
     }
 }
 
-// Get user name with fallbacks
-async function getUserName(userId, pushName) {
+// Get user name using store.getname only
+async function getUserName(userId) {
     try {
-        return pushName || (await store.getname(userId)) || userId.split('@')[0];
+        return await store.getname(userId) || userId.split('@')[0];
     } catch {
         return userId.split('@')[0];
     }
@@ -182,11 +179,11 @@ bot(
             case 'profile':
                 const profileUser = message.mentionedJid?.[0] || message.sender;
                 try {
-                    const user = await Levels.fetch(profileUser, message.chat);
-                    const name = await getUserName(profileUser, message.pushName);
+                    const messageCount = await calculateXP(profileUser, message.chat);
+                    const currentLevel = Levels.getLevelFromXP(messageCount);
+                    const name = await getUserName(profileUser);
                     const bio = await getUserBio(profileUser);
-                    const role = getRole(user?.level || 0);
-                    const totalMessages = user?.xp || 0;
+                    const role = getRole(currentLevel);
 
                     const profile = `
 *Hii ${name},*
@@ -194,8 +191,8 @@ bot(
 *👤Username:* ${name}
 *⚡Bio:* ${bio}
 *🧩Role:* ${role}
-*🍁Level:* ${user?.level || 0}
-*📥Total Messages:* ${totalMessages}
+*🍁Level:* ${currentLevel}
+*📥Total Messages:* ${messageCount}
 *Powered by ${config.BOT_NAME}*
 `;
 
@@ -216,17 +213,17 @@ bot(
             case 'rank':
                 const rankUser = message.mentionedJid?.[0] || message.sender;
                 try {
-                    const user = await Levels.fetch(rankUser, message.chat);
-                    const name = await getUserName(rankUser, message.pushName);
-                    const role = getRole(user?.level || 0);
+                    const messageCount = await calculateXP(rankUser, message.chat);
+                    const currentLevel = Levels.getLevelFromXP(messageCount);
+                    const name = await getUserName(rankUser);
+                    const role = getRole(currentLevel);
                     const disc = rankUser.substring(3, 7);
-                    const totalMessages = user?.xp || 0;
 
                     const rankText = `*Hii ${config.BOT_NAME},🌟 ${name}∆${disc}'s* Exp\n\n` +
                         `*🌟Role*: ${role}\n` +
-                        `*🟢Exp*: ${user?.xp || 0} / ${Levels.xpFor((user?.level || 0) + 1)}\n` +
-                        `*🏡Level*: ${user?.level || 0}\n` +
-                        `*Total Messages*: ${totalMessages}`;
+                        `*🟢Exp*: ${messageCount} / ${Levels.xpFor(currentLevel + 1)}\n` +
+                        `*🏡Level*: ${currentLevel}\n` +
+                        `*Total Messages*: ${messageCount}`;
 
                     try {
                         const pfp = await bot.sock.profilePictureUrl(rankUser, "image");
@@ -245,20 +242,45 @@ bot(
             case 'leaderboard':
             case 'deck':
                 try {
-                    const leaderboard = await Levels.fetchLeaderboard(message.chat, 5);
+                    const chatHistory = await store.getChatHistory(message.chat);
+                    if (!chatHistory?.length) {
+                        return await bot.reply("No message history available for this chat.");
+                    }
+
+                    const userActivity = {};
+                    for (const entry of chatHistory) {
+                        try {
+                            const msg = JSON.parse(entry.message);
+                            if (msg.key?.fromMe) continue;
+                            const participant = msg.key?.participant || msg.key?.remoteJid;
+                            if (!participant) continue;
+                            userActivity[participant] = (userActivity[participant] || 0) + 1;
+                        } catch (e) {
+                            console.error('Message parse error:', e);
+                        }
+                    }
+
+                    const users = await Promise.all(
+                        Object.entries(userActivity)
+                            .sort((a, b) => b[1] - a[1])
+                            .slice(0, 5)
+                            .map(async ([id, count]) => {
+                                const name = await getUserName(id);
+                                const level = Levels.getLevelFromXP(count);
+                                const role = getRole(level);
+                                return { id, name, count, level, role };
+                            })
+                    );
+
                     let leaderboardText = `*----● LeaderBoard ● ----*\n\n`;
 
-                    for (let i = 0; i < leaderboard.length; i++) {
-                        const user = leaderboard[i];
-                        const name = await getUserName(user.userID, null);
-                        const role = getRole(user.level);
-                        const totalMessages = user.xp;
-
-                        leaderboardText += `*${i + 1}●Name*: ${name}\n` +
+                    for (let i = 0; i < users.length; i++) {
+                        const user = users[i];
+                        leaderboardText += `*${i + 1}●Name*: ${user.name}\n` +
                             `*●Level*: ${user.level}\n` +
-                            `*●Points*: ${user.xp}\n` +
-                            `*●Role*: ${role}\n` +
-                            `*●Total messages*: ${totalMessages}\n\n`;
+                            `*●Points*: ${user.count}\n` +
+                            `*●Role*: ${user.role}\n` +
+                            `*●Total messages*: ${user.count}\n\n`;
                     }
 
                     return await bot.reply(leaderboardText);
@@ -290,26 +312,24 @@ bot(
         try {
             if (!config.MONGODB || !levelState.levelSystemEnabled || message.key?.fromMe) return;
             
-            // Calculate XP based on message count
             const messageCount = await calculateXP(message.sender, message.chat);
             const currentUser = await Levels.fetch(message.sender, message.chat);
             
-            // Only update if the calculated XP is higher than current XP
             if (!currentUser || messageCount > currentUser.xp) {
                 const hasLeveledUp = await Levels.setXp(message.sender, message.chat, messageCount);
                 
                 if (hasLeveledUp) {
-                    const user = await Levels.fetch(message.sender, message.chat);
-                    const role = getRole(user.level);
-                    const name = await getUserName(message.sender, message.pushName);
+                    const newLevel = Levels.getLevelFromXP(messageCount);
+                    const role = getRole(newLevel);
+                    const name = await getUserName(message.sender);
                     
                     await bot.sock.sendMessage(message.chat, {
                         text: `╔════⪨\n` +
                               `║ *Wow, Someone just*\n` +
                               `║ *leveled Up huh⭐*\n` +
                               `║ *👤Name*: ${name}\n` +
-                              `║ *🎐Level*: ${user.level}🍭\n` +
-                              `║ *🛑Exp*: ${user.xp} / ${Levels.xpFor(user.level + 1)}\n` +
+                              `║ *🎐Level*: ${newLevel}🍭\n` +
+                              `║ *🛑Exp*: ${messageCount} / ${Levels.xpFor(newLevel + 1)}\n` +
                               `║ *📍Role*: *${role}*\n` +
                               `║ *Enjoy🥳*\n` +
                               `╚════════════⪨`
