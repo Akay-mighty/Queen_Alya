@@ -67,30 +67,30 @@ if (config.MONGODB) {
 
 // Level roles mapping
 const LEVEL_ROLES = {
-    2: "🏳Citizen",
+    2: "👨│Citizen",
     4: "👼Baby Wizard",
-    6: "🧙‍♀️Wizard",
-    8: "🧙‍♂️Wizard Lord",
-    10: "🧚🏻Baby Mage",
-    12: "🧜Mage",
-    14: "🧜‍♂️Master of Mage",
-    16: "🌬Child of Noble",
-    18: "❄Noble",
-    20: "⚡Speed of Elite",
-    22: "🎭Elite",
-    24: "🥇Ace I",
-    26: "🥈Ace II",
-    28: "🥉Ace Master",
-    30: "🎖Ace Dominator",
-    32: "🏅Ace Elite",
-    34: "🏆Ace Supreme",
-    36: "💍Supreme I",
-    38: "💎Supreme Ii",
-    40: "🔮Supreme Master",
-    42: "🛡Legend III",
-    44: "🏹Legend II",
-    46: "⚔Legend",
-    55: "🐉Immortal"
+    6: "🧙‍♂️Wizard",
+    8: "🧙‍♀️Wizard Lord",
+    10: "🧚‍♂️Baby Mage",
+    12: "🧛Mage",
+    14: "🧛‍♀️Master of Mage",
+    16: "👶Child of Noble",
+    18: "🫅Noble",
+    20: "🏃Speed of Elite",
+    22: "👑Elite",
+    24: "🎖️Ace I",
+    26: "🏅Ace II",
+    28: "🎗️Ace Master",
+    30: "🎯Ace Dominator",
+    32: "👔Ace Elite",
+    34: "👕Ace Supreme",
+    36: "🫂Supreme I",
+    38: "🫃Supreme Ii",
+    40: "🪢Supreme Master",
+    42: "🪪Legend III",
+    44: "👓Legend II",
+    46: "🏆Legend",
+    55: "🪙Immortal"
 };
 
 // Helper function to get role based on level
@@ -108,7 +108,7 @@ function getRole(level) {
         }
     }
     
-    return "GOD✨";
+    return "GOD🫰";
 }
 
 // Calculate XP based on message count (1 XP per message)
@@ -121,7 +121,19 @@ async function calculateXP(userId, chatId) {
 
         let messageCount = 0;
         for (const entry of chatHistory) {
-            const msg = entry.message;
+            let msg;
+            
+            // Parse the message data if it's a string
+            if (typeof entry.message === 'string') {
+                try {
+                    msg = JSON.parse(entry.message);
+                } catch {
+                    continue;
+                }
+            } else {
+                msg = entry.message;
+            }
+
             if (!msg || msg.key?.fromMe) continue;
             
             // Get participant correctly
@@ -130,7 +142,9 @@ async function calculateXP(userId, chatId) {
             
             // Normalize participant ID
             const normalizedParticipant = participant.split('@')[0] + '@s.whatsapp.net';
-            const targetUser = userId.split('@')[0] + '@s.whatsapp.net';
+            const targetUser = userId.includes('@') ? 
+                userId.split('@')[0] + '@s.whatsapp.net' : 
+                userId + '@s.whatsapp.net';
 
             if (normalizedParticipant === targetUser) {
                 messageCount++;
@@ -149,8 +163,9 @@ async function getUserName(userId) {
         // Normalize user ID format
         const normalizedId = userId.includes('@') ? userId : `${userId}@s.whatsapp.net`;
         const contact = await store.getContact(normalizedId);
-        return contact?.name || contact?.notify || normalizedId.split('@')[0];
-    } catch {
+        return contact?.pushName || contact?.name || contact?.notify || normalizedId.split('@')[0];
+    } catch (error) {
+        console.error('Error getting user name:', error);
         return userId.split('@')[0];
     }
 }
@@ -283,10 +298,10 @@ bot(
                     const rankRole = getRole(rankUserLevel?.level || 0);
                     const disc = rankUser.substring(3, 7);
 
-                    const rankText = `*Hii ${config.BOT_NAME},🌟 ${rankName}∆${disc}'s* Exp\n\n` +
-                        `*🌟Role*: ${rankRole}\n` +
-                        `*🟢Exp*: ${rankMessageCount} / ${(rankUserLevel?.level || 0 + 1) * 100}\n` +
-                        `*🏡Level*: ${rankUserLevel?.level || 0}\n` +
+                    const rankText = `*Hii ${config.BOT_NAME},👋 ${rankName}✧${disc}'s* Exp\n\n` +
+                        `*👋Role*: ${rankRole}\n` +
+                        `*📊Exp*: ${rankMessageCount} / ${(rankUserLevel?.level || 0 + 1) * 100}\n` +
+                        `*📈Level*: ${rankUserLevel?.level || 0}\n` +
                         `*Total Messages*: ${rankMessageCount}`;
 
                     try {
@@ -307,18 +322,18 @@ bot(
                         return await bot.reply("No level data available for this chat yet.");
                     }
 
-                    let leaderboardText = `*----● LeaderBoard ● ----*\n\n`;
+                    let leaderboardText = `*----🏆 LeaderBoard 🏆 ----*\n\n`;
                     
                     for (let i = 0; i < leaderboard.length; i++) {
                         const user = leaderboard[i];
                         const name = await getUserName(user.userId);
                         const role = getRole(user.level);
                         
-                        leaderboardText += `*${i + 1}●Name*: ${name}\n` +
-                            `*●Level*: ${user.level}\n` +
-                            `*●Points*: ${user.xp}\n` +
-                            `*●Role*: ${role}\n` +
-                            `*●Total messages*: ${user.xp}\n\n`;
+                        leaderboardText += `*${i + 1}🏆Name*: ${name}\n` +
+                            `*🏆Level*: ${user.level}\n` +
+                            `*🏆Points*: ${user.xp}\n` +
+                            `*🏆Role*: ${role}\n` +
+                            `*🏆Total messages*: ${user.xp}\n\n`;
                     }
 
                     return await bot.reply(leaderboardText);
@@ -353,8 +368,8 @@ bot(
                 return;
             }
             
-            const messageCount = await calculateXP(message.sender, message.chat);
             const currentUser = await getUserLevel(message.sender, message.chat);
+            const messageCount = await calculateXP(message.sender, message.chat);
             
             if (messageCount > currentUser.xp) {
                 const updatedUser = await updateUserLevel(message.sender, message.chat, messageCount);
@@ -364,15 +379,15 @@ bot(
                     const role = getRole(updatedUser.level);
                     
                     await bot.sock.sendMessage(message.chat, {
-                        text: `╔════⪨\n` +
-                              `║ *Wow, Someone just*\n` +
-                              `║ *leveled Up huh⭐*\n` +
-                              `║ *👤Name*: ${name}\n` +
-                              `║ *🎐Level*: ${updatedUser.level}🍭\n` +
-                              `║ *🛑Exp*: ${updatedUser.xp} / ${(updatedUser.level + 1) * 100}\n` +
-                              `║ *📍Role*: *${role}*\n` +
-                              `║ *Enjoy🥳*\n` +
-                              `╚════════════⪨`
+                        text: `╭───────────╮\n` +
+                              `│ *Wow, Someone just*\n` +
+                              `│ *leveled Up huh✨*\n` +
+                              `│ *👤Name*: ${name}\n` +
+                              `│ *📌Level*: ${updatedUser.level}🎉\n` +
+                              `│ *📊Exp*: ${updatedUser.xp} / ${(updatedUser.level + 1) * 100}\n` +
+                              `│ *🎗️Role*: *${role}*\n` +
+                              `│ *Enjoy🎊*\n` +
+                              `╰───────────────────────────╯`
                     }, { quoted: message });
                 }
             }
