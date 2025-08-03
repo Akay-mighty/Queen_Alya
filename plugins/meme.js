@@ -6,7 +6,7 @@ const { createCanvas, loadImage } = require('canvas');
 
 // Template configurations
 const templates = {
- anime: {
+  anime: {
     image: './meme/anime.png',
     text: {
       x: 50, y: 140,
@@ -148,29 +148,34 @@ function wrapText(text, context, maxWidth) {
 bot(
   {
     name: "meme",
-    info: "Create fake tweets with various celebrity templates",
+    info: "Create fake tweets with various celebrity templates\nUsage: meme template|text\nExample: meme elon|Hello world",
     category: "fun",
     filename: __filename
   },
   async (message, bot) => {
     try {
-      const args = message.text.split(' ');
-      if (args.length < 2) {
+      if (!message.query) {
         const templateList = Object.keys(templates).join(', ');
-        return await bot.reply(`Usage: ${message.prefix}meme [template] [text]\nAvailable templates: ${templateList}`);
+        return await bot.reply(`Usage: ${message.prefix}meme template|text\nAvailable templates: ${templateList}\nExample: ${message.prefix}meme elon|Hello world`);
       }
 
-      const template = args[0].toLowerCase();
-      const text = args.slice(1).join(' ');
+      const [template, ...textParts] = message.query.split('|');
+      const text = textParts.join('|').trim();
 
-      const memePath = await createMeme(template, text);
+      if (!template || !text) {
+        const templateList = Object.keys(templates).join(', ');
+        return await bot.reply(`Usage: ${message.prefix}meme template|text\nAvailable templates: ${templateList}\nExample: ${message.prefix}meme elon|Hello world`);
+      }
+
+      const memePath = await createMeme(template.toLowerCase(), text);
       await bot.sendImage(message.chat, memePath, "Here's your meme!");
       
       // Clean up
       fs.unlink(memePath, () => {});
     } catch (error) {
       console.error("Meme creation error:", error);
-      await bot.reply(`Failed to create meme. ${error.message}\nUsage: ${message.prefix}meme [template] [text]`);
+      const templateList = Object.keys(templates).join(', ');
+      await bot.reply(`Failed to create meme. ${error.message}\nUsage: ${message.prefix}meme template|text\nAvailable templates: ${templateList}`);
     }
   }
 );
