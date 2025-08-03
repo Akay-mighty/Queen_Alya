@@ -68,7 +68,6 @@ async function initializeMongoDB() {
 
     try {
         await mongoose.connect(config.MONGODB, { 
-            useNewUrlParser: true, 
             useUnifiedTopology: true 
         });
         levelState.mongoConnected = true;
@@ -83,30 +82,31 @@ initializeMongoDB();
 
 // Level roles mapping
 const LEVEL_ROLES = {
-    2: "👨│Citizen",
-    4: "👼Baby Wizard",
-    6: "🧙‍♂️Wizard",
-    8: "🧙‍♀️Wizard Lord",
-    10: "🧚‍♂️Baby Mage",
-    12: "🧛Mage",
-    14: "🧛‍♀️Master of Mage",
-    16: "👶Child of Noble",
-    18: "🫅Noble",
-    20: "🏃Speed of Elite",
-    22: "👑Elite",
-    24: "🎖️Ace I",
-    26: "🏅Ace II",
-    28: "🎗️Ace Master",
-    30: "🎯Ace Dominator",
-    32: "👔Ace Elite",
-    34: "👕Ace Supreme",
-    36: "🫂Supreme I",
-    38: "🫃Supreme Ii",
-    40: "🪢Supreme Master",
-    42: "🪪Legend III",
-    44: "👓Legend II",
-    46: "🏆Legend",
-    55: "🪙Immortal"
+    1: "👨│Citizen",
+    2: "👼Baby Wizard",
+    3: "🧙‍♂️Wizard",
+    4: "🧙‍♀️Wizard Lord",
+    5: "🧚‍♂️Baby Mage",
+    6: "🧛Mage",
+    7: "🧛‍♀️Master of Mage",
+    8: "👶Child of Noble",
+    9: "🫅Noble",
+    10: "🏃Speed of Elite",
+    11: "👑Elite",
+    12: "🎖️Ace I",
+    13: "🏅Ace II",
+    14: "🎗️Ace Master",
+    15: "🎯Ace Dominator",
+    16: "👔Ace Elite",
+    17: "👕Ace Supreme",
+    18: "🫂Supreme I",
+    19: "🫃Supreme Ii",
+    20: "🪢Supreme Master",
+    21: "🪪Legend III",
+    22: "👓Legend II",
+    23: "🏆Legend",
+    30: "🪙Immortal",
+    40: "GOD🫰"
 };
 
 // Helper function to get role based on level
@@ -127,23 +127,19 @@ function getRole(level) {
     return "GOD🫰";
 }
 
-// Resolve LID to JID and get user info
+// Get user info using resolveLidToJid and store.getname
 async function getUserInfo(sock, userId) {
     try {
-        // Resolve to proper JID first
         const jid = await resolveLidToJid(sock, userId);
         if (!jid) throw new Error('Could not resolve JID');
         
-        // Get user name from store
-        const name = await store.getName(jid);
+        const name = await store.getname(jid);
+        if (!name) throw new Error('Could not get name');
         
-        return { jid, name: name || jid.split('@')[0] };
+        return { jid, name };
     } catch (error) {
         console.error('Error getting user info:', error);
-        return { 
-            jid: `${userId.replace(/@.+$/, '')}@s.whatsapp.net`, 
-            name: userId.split('@')[0] 
-        };
+        throw error; // We want to handle this in the calling functions
     }
 }
 
@@ -160,7 +156,6 @@ async function calculateXP(sock, userId, chatId) {
         for (const entry of chatHistory) {
             let msg;
             
-            // Parse the message data if it's a string
             if (typeof entry.message === 'string') {
                 try {
                     msg = JSON.parse(entry.message);
@@ -174,11 +169,9 @@ async function calculateXP(sock, userId, chatId) {
             if (!msg) continue;
             if (msg.key?.fromMe) continue;
             
-            // Get participant correctly
             const participant = msg.key.participant || msg.key.remoteJid;
             if (!participant) continue;
             
-            // Normalize participant ID
             const normalizedParticipant = participant.split('@')[0] + '@s.whatsapp.net';
             if (normalizedParticipant === jid) {
                 messageCount++;
@@ -308,13 +301,14 @@ bot(
                     );
                     
                 case 'profile':
-                    const profileUser = message.mentionedJid?.[0] || message.sender;
-                    const { name: profileName, jid: profileJid } = await getUserInfo(bot.sock, profileUser);
-                    const messageCount = await calculateXP(bot.sock, profileUser, message.chat);
-                    const userLevel = await updateUserLevel(profileUser, message.chat, messageCount);
-                    const role = getRole(userLevel?.level || 0);
+                    try {
+                        const profileUser = message.mentionedJid?.[0] || message.sender;
+                        const { name: profileName, jid: profileJid } = await getUserInfo(bot.sock, profileUser);
+                        const messageCount = await calculateXP(bot.sock, profileUser, message.chat);
+                        const userLevel = await updateUserLevel(profileUser, message.chat, messageCount);
+                        const role = getRole(userLevel?.level || 0);
 
-                    const profile = `
+                        const profile = `
 *👤 Profile of ${profileName}*
 
 🧩 *Role:* ${role}
@@ -324,61 +318,75 @@ bot(
 
 *Powered by ${config.BOT_NAME}*`;
 
-                    try {
-                        const pfp = await bot.sock.profilePictureUrl(profileJid, "image");
-                        return await bot.sock.sendMessage(message.chat, { 
-                            image: { url: pfp },
-                            caption: profile 
-                        }, { quoted: message });
-                    } catch {
-                        return await bot.reply(profile);
+                        try {
+                            const pfp = await bot.sock.profilePictureUrl(profileJid, "image");
+                            return await bot.sock.sendMessage(message.chat, { 
+                                image: { url: pfp },
+                                caption: profile 
+                            }, { quoted: message });
+                        } catch {
+                            return await bot.reply(profile);
+                        }
+                    } catch (error) {
+                        console.error('Profile command error:', error);
+                        return await bot.reply("❌ Could not fetch user profile. Please try again.");
                     }
                     
                 case 'rank':
-                    const rankUser = message.mentionedJid?.[0] || message.sender;
-                    const { name: rankName, jid: rankJid } = await getUserInfo(bot.sock, rankUser);
-                    const rankMessageCount = await calculateXP(bot.sock, rankUser, message.chat);
-                    const rankUserLevel = await updateUserLevel(rankUser, message.chat, rankMessageCount);
-                    const rankRole = getRole(rankUserLevel?.level || 0);
-                    const disc = rankJid.substring(3, 7);
-
-                    const rankText = `*🏆 ${rankName}✧${disc}'s Rank* 🏆\n\n` +
-                        `🧩 *Role:* ${rankRole}\n` +
-                        `📊 *XP:* ${rankMessageCount} / ${((rankUserLevel?.level || 0) + 1) * 100}\n` +
-                        `🍁 *Level:* ${rankUserLevel?.level || 0}\n` +
-                        `📥 *Messages:* ${Math.floor(rankMessageCount / 5)}`;
-
                     try {
-                        const pfp = await bot.sock.profilePictureUrl(rankJid, "image");
-                        return await bot.sock.sendMessage(message.chat, { 
-                            image: { url: pfp },
-                            caption: rankText
-                        }, { quoted: message });
-                    } catch {
-                        return await bot.reply(rankText);
+                        const rankUser = message.mentionedJid?.[0] || message.sender;
+                        const { name: rankName, jid: rankJid } = await getUserInfo(bot.sock, rankUser);
+                        const rankMessageCount = await calculateXP(bot.sock, rankUser, message.chat);
+                        const rankUserLevel = await updateUserLevel(rankUser, message.chat, rankMessageCount);
+                        const rankRole = getRole(rankUserLevel?.level || 0);
+                        const disc = rankJid.substring(3, 7);
+
+                        const rankText = `*🏆 ${rankName}✧${disc}'s Rank* 🏆\n\n` +
+                            `🧩 *Role:* ${rankRole}\n` +
+                            `📊 *XP:* ${rankMessageCount} / ${((rankUserLevel?.level || 0) + 1) * 100}\n` +
+                            `🍁 *Level:* ${rankUserLevel?.level || 0}\n` +
+                            `📥 *Messages:* ${Math.floor(rankMessageCount / 5)}`;
+
+                        try {
+                            const pfp = await bot.sock.profilePictureUrl(rankJid, "image");
+                            return await bot.sock.sendMessage(message.chat, { 
+                                image: { url: pfp },
+                                caption: rankText
+                            }, { quoted: message });
+                        } catch {
+                            return await bot.reply(rankText);
+                        }
+                    } catch (error) {
+                        console.error('Rank command error:', error);
+                        return await bot.reply("❌ Could not fetch user rank. Please try again.");
                     }
                     
                 case 'leaderboard':
                 case 'deck':
-                    const leaderboard = await getLeaderboard(message.chat, 5);
-                    if (!leaderboard.length) {
-                        return await bot.reply("No level data available for this chat yet.");
-                    }
+                    try {
+                        const leaderboard = await getLeaderboard(message.chat, 5);
+                        if (!leaderboard.length) {
+                            return await bot.reply("No level data available for this chat yet.");
+                        }
 
-                    const groupName = await getGroupMetadata(bot.sock, message.chat);
-                    let leaderboardText = `*🏆 Leaderboard for ${groupName}* 🏆\n\n`;
-                    
-                    for (let i = 0; i < leaderboard.length; i++) {
-                        const user = leaderboard[i];
-                        const { name } = await getUserInfo(bot.sock, user.userId);
-                        const role = getRole(user.level);
+                        const groupName = await getGroupMetadata(bot.sock, message.chat);
+                        let leaderboardText = `*🏆 Leaderboard for ${groupName}* 🏆\n\n`;
                         
-                        leaderboardText += `*${i + 1}.* ${name}\n` +
-                            `   � Level: ${user.level} | ${role}\n` +
-                            `   📊 XP: ${user.xp} (${Math.floor(user.xp / 5)} msgs)\n\n`;
-                    }
+                        for (let i = 0; i < leaderboard.length; i++) {
+                            const user = leaderboard[i];
+                            const { name } = await getUserInfo(bot.sock, user.userId);
+                            const role = getRole(user.level);
+                            
+                            leaderboardText += `*${i + 1}.* ${name}\n` +
+                                `   🧩 Level: ${user.level} | ${role}\n` +
+                                `   📊 XP: ${user.xp} (${Math.floor(user.xp / 5)} msgs)\n\n`;
+                        }
 
-                    return await bot.reply(leaderboardText);
+                        return await bot.reply(leaderboardText);
+                    } catch (error) {
+                        console.error('Leaderboard command error:', error);
+                        return await bot.reply("❌ Could not fetch leaderboard. Please try again.");
+                    }
                 
                 case 'status':
                 default:
@@ -437,14 +445,15 @@ bot(
                     const role = getRole(updatedUser.level);
                     
                     await bot.sock.sendMessage(message.chat, {
-                        text: `╭───────────────╮\n` +
-                              `│ 🎉 *LEVEL UP!* 🎉\n` +
-                              `├───────────────┤\n` +
-                              `│ 👤 *Name:* ${name}\n` +
-                              `│ 🍁 *New Level:* ${updatedUser.level}\n` +
-                              `│ 🧩 *New Role:* ${role}\n` +
-                              `│ 📊 *XP Progress:* ${updatedUser.xp}/${(updatedUser.level + 1) * 100}\n` +
-                              `╰───────────────╯`
+                        text: `╭─────────────────────────────╮\n` +
+                              `│        🎉 *LEVEL UP!* 🎉\n` +
+                              `├─────────────────────────────┤\n` +
+                              `│ *User:* ${name}\n` +
+                              `│ *New Level:* ${updatedUser.level}\n` +
+                              `│ *New Role:* ${role}\n` +
+                              `│ *XP Progress:* ${updatedUser.xp}/${(updatedUser.level + 1) * 100}\n` +
+                              `╰─────────────────────────────╯\n` +
+                              `Congratulations on your achievement!`
                     }, { quoted: message });
                 }
             }
