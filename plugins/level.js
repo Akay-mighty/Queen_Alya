@@ -437,22 +437,25 @@ bot(
             if (messageCount > currentUser.lastMessageCount) {
                 const updatedUser = await updateUserLevel(message.sender, message.chat, messageCount);
                 
-if (updatedUser && updatedUser.level > currentUser.level) {
-    const { name } = await getUserInfo(bot.sock, message.sender);
-    const role = getRole(updatedUser.level);
-    
-    await bot.sock.sendMessage(message.chat, {
-        text: `╔════⪨\n` +
-              `║ *Wow, someone just*\n` +
-              `║ *leveled up huh⭐*\n` +
-              `║ *👤 Name:* ${name}\n` +
-              `║ *🎐 Level:* ${updatedUser.level}🍭\n` +
-              `║ *🛑 Exp:* ${updatedUser.xp} / ${(updatedUser.level + 1) * 100}\n` +
-              `║ *📍 Role:* *${role}*\n` +
-              `║ *Enjoy🥳*\n` +
-              `╚════════════⪨`
-    }, { quoted: message });
-}
+                try {
+                    if (updatedUser && updatedUser.level > currentUser.level) {
+                        const { name } = await getUserInfo(bot.sock, message.sender);
+                        const role = getRole(updatedUser.level);
+                        
+                        await bot.sock.sendMessage(message.chat, {
+                            text: `╔════⪨\n` +
+                                  `║ *Wow, someone just*\n` +
+                                  `║ *leveled up huh⭐*\n` +
+                                  `║ *👤 Name:* ${name}\n` +
+                                  `║ *🎐 Level:* ${updatedUser.level}🍭\n` +
+                                  `║ *🛑 Exp:* ${updatedUser.xp} / ${(updatedUser.level + 1) * 100}\n` +
+                                  `║ *📍 Role:* *${role}*\n` +
+                                  `║ *Enjoy🥳*\n` +
+                                  `╚════════════⪨`
+                        }, { quoted: message });
+                    }
+                } catch (error) {
+                    console.error('Error sending level up message:', error);
                 }
             }
         } catch (error) {
