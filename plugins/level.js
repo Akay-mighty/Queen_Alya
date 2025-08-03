@@ -8,7 +8,8 @@ const { resolveLidToJid } = require("../lib/serialize");
 // Level system state
 const levelState = {
     configFile: path.join(__dirname, '..', 'config.js'),
-    levelSystemEnabled: config.LEVEL_UP === "true"
+    levelSystemEnabled: config.LEVEL_UP === "true",
+    mongoConnected: false
 };
 
 // File watcher to reload config changes
@@ -18,6 +19,8 @@ fs.watch(levelState.configFile, (eventType, filename) => {
             delete require.cache[require.resolve(levelState.configFile)];
             const newConfig = require(levelState.configFile);
             levelState.levelSystemEnabled = newConfig.LEVEL_UP === "true";
+            console.log('Level: Config reloaded. Level system is now', 
+                levelState.levelSystemEnabled ? 'ENABLED' : 'DISABLED');
         } catch (error) {
             console.error('Level: Error reloading config:', error);
         }
@@ -32,6 +35,8 @@ function updateConfig(newValues) {
         fs.writeFileSync(levelState.configFile, `module.exports = ${JSON.stringify(updatedConfig, null, 2)};`);
         delete require.cache[require.resolve(levelState.configFile)];
         levelState.levelSystemEnabled = updatedConfig.LEVEL_UP === "true";
+        console.log('Level: Config updated. Level system is now', 
+            levelState.levelSystemEnabled ? 'ENABLED' : 'DISABLED');
         return true;
     } catch (error) {
         console.error('Level: Error updating config:', error);
@@ -54,17 +59,27 @@ userLevelSchema.index({ userId: 1, chatId: 1 }, { unique: true });
 const UserLevel = mongoose.models.UserLevel || mongoose.model('UserLevel', userLevelSchema);
 
 // Initialize MongoDB connection if configured
-if (config.MONGODB) {
+async function initializeMongoDB() {
+    if (!config.MONGODB) {
+        console.error('MongoDB connection URL not configured. Level system will not work properly.');
+        levelState.mongoConnected = false;
+        return;
+    }
+
     try {
-        mongoose.connect(config.MONGODB, { 
+        await mongoose.connect(config.MONGODB, { 
             useNewUrlParser: true, 
             useUnifiedTopology: true 
         });
+        levelState.mongoConnected = true;
         console.log('Connected to MongoDB for level system');
     } catch (error) {
+        levelState.mongoConnected = false;
         console.error('Error connecting to MongoDB:', error);
     }
 }
+
+initializeMongoDB();
 
 // Level roles mapping
 const LEVEL_ROLES = {
@@ -112,15 +127,24 @@ function getRole(level) {
     return "GOD🫰";
 }
 
-// Resolve LID to JID
-async function resolveToJid(sock, lid) {
+// Resolve LID to JID and get user info
+async function getUserInfo(sock, userId) {
     try {
-        if (lid.includes('@')) return lid; // Already a JID
-        const jid = await resolveLidToJid(sock, lid);
-        return jid || `${lid}@s.whatsapp.net`;
+        // Resolve to proper JID first
+        let jid = userId.includes('@') ? userId : await resolveLidToJid(sock, userId);
+        if (!jid) jid = `${userId}@s.whatsapp.net`;
+        
+        // Get user name from store
+        const contact = await store.getContact(jid);
+        const name = contact?.pushName || contact?.name || contact?.notify || jid.split('@')[0];
+        
+        return { jid, name };
     } catch (error) {
-        console.error('Error resolving JID:', error);
-        return `${lid}@s.whatsapp.net`;
+        console.error('Error getting user info:', error);
+        return { 
+            jid: `${userId}@s.whatsapp.net`, 
+            name: userId.split('@')[0] 
+        };
     }
 }
 
@@ -129,7 +153,7 @@ async function calculateXP(sock, userId, chatId) {
     try {
         if (!chatId.endsWith('@g.us')) return 0; // Only work in groups
         
-        const jid = await resolveToJid(sock, userId);
+        const { jid } = await getUserInfo(sock, userId);
         const chatHistory = await store.getChatHistory(chatId);
         if (!chatHistory?.length) return 0;
 
@@ -171,28 +195,16 @@ async function calculateXP(sock, userId, chatId) {
     }
 }
 
-// Get user name 
-async function getUserName(sock, userId) {
-    try {
-        const jid = await resolveToJid(sock, userId);
-        const contact = await store.getContact(jid);
-        return contact?.pushName || contact?.name || contact?.notify || jid.split('@')[0];
-    } catch (error) {
-        console.error('Error getting user name:', error);
-        return userId.split('@')[0];
-    }
-}
-
 // Update or create user level
 async function updateUserLevel(userId, chatId, xp) {
     try {
         if (!chatId.endsWith('@g.us')) return null; // Only work in groups
         
-        const level = Math.floor(xp / 100); // 100 XP per level (adjust as needed)
+        const level = Math.floor(xp / 100); // 100 XP per level
         
         const userLevel = await UserLevel.findOneAndUpdate(
             { userId, chatId },
-            { $set: { xp, level } },
+            { $set: { xp, level, lastMessageCount: xp } },
             { upsert: true, new: true }
         );
         
@@ -209,10 +221,10 @@ async function getUserLevel(userId, chatId) {
         if (!chatId.endsWith('@g.us')) return null; // Only work in groups
         
         const userLevel = await UserLevel.findOne({ userId, chatId });
-        return userLevel || { xp: 0, level: 0 };
+        return userLevel || { xp: 0, level: 0, lastMessageCount: 0 };
     } catch (error) {
         console.error('Error getting user level:', error);
-        return { xp: 0, level: 0 };
+        return { xp: 0, level: 0, lastMessageCount: 0 };
     }
 }
 
@@ -241,12 +253,20 @@ bot(
             "level on/off - Toggle level system",
             "level profile [@user] - Show user profile",
             "level rank [@user] - Show user rank",
-            "level leaderboard - Show top users"
+            "level leaderboard - Show top users",
+            "level status - Show system status"
         ]
     },
     async (message, bot) => {
-        if (!config.MONGODB) {
-            return await bot.reply("MongoDB connection is not configured. Please set MONGODB in config.");
+        // Check MongoDB connection first
+        if (!levelState.mongoConnected) {
+            return await bot.reply(
+                "⚠️ MongoDB connection is not available.\n" +
+                "Please check:\n" +
+                "1. If MONGODB is configured in config.js\n" +
+                "2. If the MongoDB server is running\n" +
+                "3. If the connection URL is correct"
+            );
         }
 
         // Only work in groups
@@ -260,41 +280,46 @@ bot(
         try {
             switch (action?.toLowerCase()) {
                 case 'on':
+                    if (levelState.levelSystemEnabled) {
+                        return await bot.reply("Level system is already enabled.");
+                    }
                     const onSuccess = updateConfig({ LEVEL_UP: "true" });
                     return await bot.reply(
                         onSuccess 
-                            ? "Level system has been enabled." 
-                            : "Failed to enable level system."
+                            ? "✅ Level system has been enabled." 
+                            : "❌ Failed to enable level system."
                     );
                     
                 case 'off':
+                    if (!levelState.levelSystemEnabled) {
+                        return await bot.reply("Level system is already disabled.");
+                    }
                     const offSuccess = updateConfig({ LEVEL_UP: "false" });
                     return await bot.reply(
                         offSuccess 
-                            ? "Level system has been disabled." 
-                            : "Failed to disable level system."
+                            ? "✅ Level system has been disabled." 
+                            : "❌ Failed to disable level system."
                     );
                     
                 case 'profile':
                     const profileUser = message.mentionedJid?.[0] || message.sender;
+                    const { name: profileName, jid: profileJid } = await getUserInfo(bot.sock, profileUser);
                     const messageCount = await calculateXP(bot.sock, profileUser, message.chat);
                     const userLevel = await updateUserLevel(profileUser, message.chat, messageCount);
-                    const name = await getUserName(bot.sock, profileUser);
                     const role = getRole(userLevel?.level || 0);
 
                     const profile = `
-*Hii ${name},*
-*Here is your profile information*
-*👤Username:* ${name}
-*🧩Role:* ${role}
-*🍁Level:* ${userLevel?.level || 0}
-*📥Total Messages:* ${messageCount}
-*Powered by ${config.BOT_NAME}*
-`;
+*👤 Profile of ${profileName}*
+
+🧩 *Role:* ${role}
+🍁 *Level:* ${userLevel?.level || 0}
+📥 *Total Messages:* ${messageCount}
+📊 *XP:* ${userLevel?.xp || 0} / ${((userLevel?.level || 0) + 1) * 100}
+
+*Powered by ${config.BOT_NAME}*`;
 
                     try {
-                        const jid = await resolveToJid(bot.sock, profileUser);
-                        const pfp = await bot.sock.profilePictureUrl(jid, "image");
+                        const pfp = await bot.sock.profilePictureUrl(profileJid, "image");
                         return await bot.sock.sendMessage(message.chat, { 
                             image: { url: pfp },
                             caption: profile 
@@ -305,21 +330,20 @@ bot(
                     
                 case 'rank':
                     const rankUser = message.mentionedJid?.[0] || message.sender;
+                    const { name: rankName, jid: rankJid } = await getUserInfo(bot.sock, rankUser);
                     const rankMessageCount = await calculateXP(bot.sock, rankUser, message.chat);
                     const rankUserLevel = await updateUserLevel(rankUser, message.chat, rankMessageCount);
-                    const rankName = await getUserName(bot.sock, rankUser);
                     const rankRole = getRole(rankUserLevel?.level || 0);
-                    const disc = rankUser.substring(3, 7);
+                    const disc = rankJid.substring(3, 7);
 
-                    const rankText = `*Hii ${config.BOT_NAME},👋 ${rankName}✧${disc}'s* Exp\n\n` +
-                        `*👋Role*: ${rankRole}\n` +
-                        `*📊Exp*: ${rankMessageCount} / ${(rankUserLevel?.level || 0 + 1) * 100}\n` +
-                        `*📈Level*: ${rankUserLevel?.level || 0}\n` +
-                        `*Total Messages*: ${rankMessageCount}`;
+                    const rankText = `*🏆 ${rankName}✧${disc}'s Rank* 🏆\n\n` +
+                        `🧩 *Role:* ${rankRole}\n` +
+                        `📊 *XP:* ${rankMessageCount} / ${((rankUserLevel?.level || 0) + 1) * 100}\n` +
+                        `🍁 *Level:* ${rankUserLevel?.level || 0}\n` +
+                        `📥 *Messages:* ${rankMessageCount}`;
 
                     try {
-                        const jid = await resolveToJid(bot.sock, rankUser);
-                        const pfp = await bot.sock.profilePictureUrl(jid, "image");
+                        const pfp = await bot.sock.profilePictureUrl(rankJid, "image");
                         return await bot.sock.sendMessage(message.chat, { 
                             image: { url: pfp },
                             caption: rankText
@@ -335,34 +359,42 @@ bot(
                         return await bot.reply("No level data available for this chat yet.");
                     }
 
-                    let leaderboardText = `*----🏆 LeaderBoard 🏆 ----*\n\n`;
+                    let leaderboardText = `*🏆 Leaderboard for ${message.pushName || 'this chat'}* 🏆\n\n`;
                     
                     for (let i = 0; i < leaderboard.length; i++) {
                         const user = leaderboard[i];
-                        const name = await getUserName(bot.sock, user.userId);
+                        const { name } = await getUserInfo(bot.sock, user.userId);
                         const role = getRole(user.level);
                         
-                        leaderboardText += `*${i + 1}🏆Name*: ${name}\n` +
-                            `*🏆Level*: ${user.level}\n` +
-                            `*🏆Points*: ${user.xp}\n` +
-                            `*🏆Role*: ${role}\n` +
-                            `*🏆Total messages*: ${user.xp}\n\n`;
+                        leaderboardText += `*${i + 1}.* ${name}\n` +
+                            `   🍁 Level: ${user.level} | ${role}\n` +
+                            `   📊 XP: ${user.xp}\n\n`;
                     }
 
                     return await bot.reply(leaderboardText);
+                
+                case 'status':
+                    return await bot.reply(
+                        `*Level System Status*\n\n` +
+                        `🔹 *Enabled:* ${levelState.levelSystemEnabled ? '✅ Yes' : '❌ No'}\n` +
+                        `🔹 *MongoDB:* ${levelState.mongoConnected ? '✅ Connected' : '❌ Disconnected'}\n` +
+                        `🔹 *Current XP per level:* 100\n` +
+                        `🔹 *Total roles:* ${Object.keys(LEVEL_ROLES).length}`
+                    );
                     
                 default:
                     return await bot.reply(
-                        `*Level System Commands:*\n\n` +
-                        `${config.PREFIX}level on/off - Toggle level system\n` +
-                        `${config.PREFIX}level profile [@user] - Show profile\n` +
-                        `${config.PREFIX}level rank [@user] - Show rank\n` +
-                        `${config.PREFIX}level leaderboard - Show top users`
+                        `*📜 Level System Commands*\n\n` +
+                        `🔹 ${config.PREFIX}level on/off - Toggle system\n` +
+                        `🔹 ${config.PREFIX}level profile [@user] - Show profile\n` +
+                        `🔹 ${config.PREFIX}level rank [@user] - Show rank\n` +
+                        `🔹 ${config.PREFIX}level leaderboard - Top users\n` +
+                        `🔹 ${config.PREFIX}level status - System status`
                     );
             }
         } catch (error) {
             console.error('Level command error:', error);
-            return await bot.reply("An error occurred while processing your request.");
+            return await bot.reply("❌ An error occurred while processing your request.");
         }
     }
 );
@@ -376,31 +408,36 @@ bot(
     },
     async (message, bot) => {
         try {
-            if (!config.MONGODB || !levelState.levelSystemEnabled || 
-                message.key?.fromMe || !message.chat.endsWith('@g.us')) {
+            // Check if system should process this message
+            if (!levelState.mongoConnected || 
+                !levelState.levelSystemEnabled || 
+                message.key?.fromMe || 
+                !message.chat.endsWith('@g.us')) {
                 return;
             }
             
+            // Get current user data
             const currentUser = await getUserLevel(message.sender, message.chat);
             const messageCount = await calculateXP(bot.sock, message.sender, message.chat);
             
-            if (messageCount > currentUser.xp) {
+            // Only update if there's a significant change (prevent spamming)
+            if (messageCount > currentUser.lastMessageCount) {
                 const updatedUser = await updateUserLevel(message.sender, message.chat, messageCount);
                 
+                // Check for level up
                 if (updatedUser && updatedUser.level > currentUser.level) {
-                    const name = await getUserName(bot.sock, message.sender);
+                    const { name } = await getUserInfo(bot.sock, message.sender);
                     const role = getRole(updatedUser.level);
                     
                     await bot.sock.sendMessage(message.chat, {
-                        text: `╭───────────╮\n` +
-                              `│ *Wow, Someone just*\n` +
-                              `│ *leveled Up huh✨*\n` +
-                              `│ *👤Name*: ${name}\n` +
-                              `│ *📌Level*: ${updatedUser.level}🎉\n` +
-                              `│ *📊Exp*: ${updatedUser.xp} / ${(updatedUser.level + 1) * 100}\n` +
-                              `│ *🎗️Role*: *${role}*\n` +
-                              `│ *Enjoy🎊*\n` +
-                              `╰───────────────────────────╯`
+                        text: `╭───────────────╮\n` +
+                              `│ 🎉 *LEVEL UP!* 🎉\n` +
+                              `├───────────────┤\n` +
+                              `│ 👤 *Name:* ${name}\n` +
+                              `│ 🍁 *New Level:* ${updatedUser.level}\n` +
+                              `│ 🧩 *New Role:* ${role}\n` +
+                              `│ 📊 *XP Progress:* ${updatedUser.xp}/${(updatedUser.level + 1) * 100}\n` +
+                              `╰───────────────╯`
                     }, { quoted: message });
                 }
             }
