@@ -131,24 +131,23 @@ function getRole(level) {
 async function getUserInfo(sock, userId) {
     try {
         // Resolve to proper JID first
-        let jid = userId.includes('@') ? userId : await resolveLidToJid(sock, userId);
-        if (!jid) jid = `${userId}@s.whatsapp.net`;
+        const jid = await resolveLidToJid(sock, userId);
+        if (!jid) throw new Error('Could not resolve JID');
         
         // Get user name from store
-        const contact = await store.getContact(jid);
-        const name = contact?.pushName || contact?.name || contact?.notify || jid.split('@')[0];
+        const name = await store.getName(jid);
         
-        return { jid, name };
+        return { jid, name: name || jid.split('@')[0] };
     } catch (error) {
         console.error('Error getting user info:', error);
         return { 
-            jid: `${userId}@s.whatsapp.net`, 
+            jid: `${userId.replace(/@.+$/, '')}@s.whatsapp.net`, 
             name: userId.split('@')[0] 
         };
     }
 }
 
-// Calculate XP based on message count (1 XP per message)
+// Calculate XP based on message count (5 XP per message)
 async function calculateXP(sock, userId, chatId) {
     try {
         if (!chatId.endsWith('@g.us')) return 0; // Only work in groups
@@ -165,30 +164,23 @@ async function calculateXP(sock, userId, chatId) {
             if (typeof entry.message === 'string') {
                 try {
                     msg = JSON.parse(entry.message);
-                } catch {
-                    continue;
+                if (!msg) continue;
+                if (msg.key?.fromMe) continue;
+                
+                // Get participant correctly
+                const participant = msg.key.participant || msg.key.remoteJid;
+                if (!participant) continue;
+                
+                // Normalize participant ID
+                const normalizedParticipant = participant.split('@')[0] + '@s.whatsapp.net';
+                if (normalizedParticipant === jid) {
+                    messageCount++;
                 }
-            } else {
-                msg = entry.message;
-            }
-
-            if (!msg || msg.key?.fromMe) continue;
-            
-            // Get participant correctly
-            const participant = msg.key.participant || msg.key.remoteJid;
-            if (!participant) continue;
-            
-            // Normalize participant ID
-            const normalizedParticipant = participant.split('@')[0] + '@s.whatsapp.net';
-            const targetUser = jid.includes('@') ? 
-                jid.split('@')[0] + '@s.whatsapp.net' : 
-                jid + '@s.whatsapp.net';
-
-            if (normalizedParticipant === targetUser) {
-                messageCount++;
+            } catch {
+                continue;
             }
         }
-        return messageCount;
+        return messageCount * 5; // 5 XP per message
     } catch (error) {
         console.error('Error calculating XP:', error);
         return 0;
@@ -200,7 +192,7 @@ async function updateUserLevel(userId, chatId, xp) {
     try {
         if (!chatId.endsWith('@g.us')) return null; // Only work in groups
         
-        const level = Math.floor(xp / 100); // 100 XP per level
+        const level = Math.floor(xp / 100); // 100 XP per level (20 messages)
         
         const userLevel = await UserLevel.findOneAndUpdate(
             { userId, chatId },
@@ -244,6 +236,17 @@ async function getLeaderboard(chatId, limit = 5) {
     }
 }
 
+// Get group metadata
+async function getGroupMetadata(sock, groupJid) {
+    try {
+        const metadata = await sock.groupMetadata(groupJid);
+        return metadata.subject || 'this chat';
+    } catch (error) {
+        console.error('Error getting group metadata:', error);
+        return 'this chat';
+    }
+}
+
 bot(
     {
         name: "level",
@@ -253,8 +256,7 @@ bot(
             "level on/off - Toggle level system",
             "level profile [@user] - Show user profile",
             "level rank [@user] - Show user rank",
-            "level leaderboard - Show top users",
-            "level status - Show system status"
+            "level leaderboard - Show top users"
         ]
     },
     async (message, bot) => {
@@ -313,7 +315,7 @@ bot(
 
 🧩 *Role:* ${role}
 🍁 *Level:* ${userLevel?.level || 0}
-📥 *Total Messages:* ${messageCount}
+📥 *Total Messages:* ${Math.floor(messageCount / 5)}
 📊 *XP:* ${userLevel?.xp || 0} / ${((userLevel?.level || 0) + 1) * 100}
 
 *Powered by ${config.BOT_NAME}*`;
@@ -340,7 +342,7 @@ bot(
                         `🧩 *Role:* ${rankRole}\n` +
                         `📊 *XP:* ${rankMessageCount} / ${((rankUserLevel?.level || 0) + 1) * 100}\n` +
                         `🍁 *Level:* ${rankUserLevel?.level || 0}\n` +
-                        `📥 *Messages:* ${rankMessageCount}`;
+                        `📥 *Messages:* ${Math.floor(rankMessageCount / 5)}`;
 
                     try {
                         const pfp = await bot.sock.profilePictureUrl(rankJid, "image");
@@ -359,7 +361,8 @@ bot(
                         return await bot.reply("No level data available for this chat yet.");
                     }
 
-                    let leaderboardText = `*🏆 Leaderboard for ${message.pushName || 'this chat'}* 🏆\n\n`;
+                    const groupName = await getGroupMetadata(bot.sock, message.chat);
+                    let leaderboardText = `*🏆 Leaderboard for ${groupName}* 🏆\n\n`;
                     
                     for (let i = 0; i < leaderboard.length; i++) {
                         const user = leaderboard[i];
@@ -368,28 +371,28 @@ bot(
                         
                         leaderboardText += `*${i + 1}.* ${name}\n` +
                             `   🍁 Level: ${user.level} | ${role}\n` +
-                            `   📊 XP: ${user.xp}\n\n`;
+                            `   📊 XP: ${user.xp} (${Math.floor(user.xp / 5)} msgs)\n\n`;
                     }
 
                     return await bot.reply(leaderboardText);
                 
                 case 'status':
-                    return await bot.reply(
-                        `*Level System Status*\n\n` +
-                        `🔹 *Enabled:* ${levelState.levelSystemEnabled ? '✅ Yes' : '❌ No'}\n` +
-                        `🔹 *MongoDB:* ${levelState.mongoConnected ? '✅ Connected' : '❌ Disconnected'}\n` +
-                        `🔹 *Current XP per level:* 100\n` +
-                        `🔹 *Total roles:* ${Object.keys(LEVEL_ROLES).length}`
-                    );
-                    
                 default:
+                    const groupNameStatus = await getGroupMetadata(bot.sock, message.chat);
                     return await bot.reply(
-                        `*📜 Level System Commands*\n\n` +
+                        `*📜 Level System - ${groupNameStatus}*\n\n` +
+                        `*🔹 Status*\n` +
+                        `- System: ${levelState.levelSystemEnabled ? '✅ Enabled' : '❌ Disabled'}\n` +
+                        `- MongoDB: ${levelState.mongoConnected ? '✅ Connected' : '❌ Disconnected'}\n\n` +
+                        `*🔹 XP System*\n` +
+                        `- XP per message: 5\n` +
+                        `- XP per level: 100 (20 messages)\n` +
+                        `- Total roles: ${Object.keys(LEVEL_ROLES).length}\n\n` +
+                        `*📌 Usage*\n` +
                         `🔹 ${config.PREFIX}level on/off - Toggle system\n` +
                         `🔹 ${config.PREFIX}level profile [@user] - Show profile\n` +
                         `🔹 ${config.PREFIX}level rank [@user] - Show rank\n` +
-                        `🔹 ${config.PREFIX}level leaderboard - Top users\n` +
-                        `🔹 ${config.PREFIX}level status - System status`
+                        `🔹 ${config.PREFIX}level leaderboard - Top users`
                     );
             }
         } catch (error) {
