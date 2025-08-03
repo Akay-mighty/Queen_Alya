@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const config = require("../config");
 const fs = require('fs');
 const path = require('path');
+const { resolveLidToJid } = require("../lib/serialize");
 
 // Level system state
 const levelState = {
@@ -111,11 +112,24 @@ function getRole(level) {
     return "GOD🫰";
 }
 
+// Resolve LID to JID
+async function resolveToJid(sock, lid) {
+    try {
+        if (lid.includes('@')) return lid; // Already a JID
+        const jid = await resolveLidToJid(sock, lid);
+        return jid || `${lid}@s.whatsapp.net`;
+    } catch (error) {
+        console.error('Error resolving JID:', error);
+        return `${lid}@s.whatsapp.net`;
+    }
+}
+
 // Calculate XP based on message count (1 XP per message)
-async function calculateXP(userId, chatId) {
+async function calculateXP(sock, userId, chatId) {
     try {
         if (!chatId.endsWith('@g.us')) return 0; // Only work in groups
         
+        const jid = await resolveToJid(sock, userId);
         const chatHistory = await store.getChatHistory(chatId);
         if (!chatHistory?.length) return 0;
 
@@ -142,9 +156,9 @@ async function calculateXP(userId, chatId) {
             
             // Normalize participant ID
             const normalizedParticipant = participant.split('@')[0] + '@s.whatsapp.net';
-            const targetUser = userId.includes('@') ? 
-                userId.split('@')[0] + '@s.whatsapp.net' : 
-                userId + '@s.whatsapp.net';
+            const targetUser = jid.includes('@') ? 
+                jid.split('@')[0] + '@s.whatsapp.net' : 
+                jid + '@s.whatsapp.net';
 
             if (normalizedParticipant === targetUser) {
                 messageCount++;
@@ -158,12 +172,11 @@ async function calculateXP(userId, chatId) {
 }
 
 // Get user name 
-async function getUserName(userId) {
+async function getUserName(sock, userId) {
     try {
-        // Normalize user ID format
-        const normalizedId = userId.includes('@') ? userId : `${userId}@s.whatsapp.net`;
-        const contact = await store.getContact(normalizedId);
-        return contact?.pushName || contact?.name || contact?.notify || normalizedId.split('@')[0];
+        const jid = await resolveToJid(sock, userId);
+        const contact = await store.getContact(jid);
+        return contact?.pushName || contact?.name || contact?.notify || jid.split('@')[0];
     } catch (error) {
         console.error('Error getting user name:', error);
         return userId.split('@')[0];
@@ -264,9 +277,9 @@ bot(
                     
                 case 'profile':
                     const profileUser = message.mentionedJid?.[0] || message.sender;
-                    const messageCount = await calculateXP(profileUser, message.chat);
+                    const messageCount = await calculateXP(bot.sock, profileUser, message.chat);
                     const userLevel = await updateUserLevel(profileUser, message.chat, messageCount);
-                    const name = await getUserName(profileUser);
+                    const name = await getUserName(bot.sock, profileUser);
                     const role = getRole(userLevel?.level || 0);
 
                     const profile = `
@@ -280,8 +293,8 @@ bot(
 `;
 
                     try {
-                        const normalizedId = profileUser.includes('@') ? profileUser : `${profileUser}@s.whatsapp.net`;
-                        const pfp = await bot.sock.profilePictureUrl(normalizedId, "image");
+                        const jid = await resolveToJid(bot.sock, profileUser);
+                        const pfp = await bot.sock.profilePictureUrl(jid, "image");
                         return await bot.sock.sendMessage(message.chat, { 
                             image: { url: pfp },
                             caption: profile 
@@ -292,9 +305,9 @@ bot(
                     
                 case 'rank':
                     const rankUser = message.mentionedJid?.[0] || message.sender;
-                    const rankMessageCount = await calculateXP(rankUser, message.chat);
+                    const rankMessageCount = await calculateXP(bot.sock, rankUser, message.chat);
                     const rankUserLevel = await updateUserLevel(rankUser, message.chat, rankMessageCount);
-                    const rankName = await getUserName(rankUser);
+                    const rankName = await getUserName(bot.sock, rankUser);
                     const rankRole = getRole(rankUserLevel?.level || 0);
                     const disc = rankUser.substring(3, 7);
 
@@ -305,8 +318,8 @@ bot(
                         `*Total Messages*: ${rankMessageCount}`;
 
                     try {
-                        const normalizedId = rankUser.includes('@') ? rankUser : `${rankUser}@s.whatsapp.net`;
-                        const pfp = await bot.sock.profilePictureUrl(normalizedId, "image");
+                        const jid = await resolveToJid(bot.sock, rankUser);
+                        const pfp = await bot.sock.profilePictureUrl(jid, "image");
                         return await bot.sock.sendMessage(message.chat, { 
                             image: { url: pfp },
                             caption: rankText
@@ -326,7 +339,7 @@ bot(
                     
                     for (let i = 0; i < leaderboard.length; i++) {
                         const user = leaderboard[i];
-                        const name = await getUserName(user.userId);
+                        const name = await getUserName(bot.sock, user.userId);
                         const role = getRole(user.level);
                         
                         leaderboardText += `*${i + 1}🏆Name*: ${name}\n` +
@@ -369,13 +382,13 @@ bot(
             }
             
             const currentUser = await getUserLevel(message.sender, message.chat);
-            const messageCount = await calculateXP(message.sender, message.chat);
+            const messageCount = await calculateXP(bot.sock, message.sender, message.chat);
             
             if (messageCount > currentUser.xp) {
                 const updatedUser = await updateUserLevel(message.sender, message.chat, messageCount);
                 
                 if (updatedUser && updatedUser.level > currentUser.level) {
-                    const name = await getUserName(message.sender);
+                    const name = await getUserName(bot.sock, message.sender);
                     const role = getRole(updatedUser.level);
                     
                     await bot.sock.sendMessage(message.chat, {
