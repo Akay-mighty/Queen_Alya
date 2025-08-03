@@ -164,20 +164,24 @@ async function calculateXP(sock, userId, chatId) {
             if (typeof entry.message === 'string') {
                 try {
                     msg = JSON.parse(entry.message);
-                if (!msg) continue;
-                if (msg.key?.fromMe) continue;
-                
-                // Get participant correctly
-                const participant = msg.key.participant || msg.key.remoteJid;
-                if (!participant) continue;
-                
-                // Normalize participant ID
-                const normalizedParticipant = participant.split('@')[0] + '@s.whatsapp.net';
-                if (normalizedParticipant === jid) {
-                    messageCount++;
+                } catch {
+                    continue;
                 }
-            } catch {
-                continue;
+            } else {
+                msg = entry.message;
+            }
+
+            if (!msg) continue;
+            if (msg.key?.fromMe) continue;
+            
+            // Get participant correctly
+            const participant = msg.key.participant || msg.key.remoteJid;
+            if (!participant) continue;
+            
+            // Normalize participant ID
+            const normalizedParticipant = participant.split('@')[0] + '@s.whatsapp.net';
+            if (normalizedParticipant === jid) {
+                messageCount++;
             }
         }
         return messageCount * 5; // 5 XP per message
@@ -370,7 +374,7 @@ bot(
                         const role = getRole(user.level);
                         
                         leaderboardText += `*${i + 1}.* ${name}\n` +
-                            `   🍁 Level: ${user.level} | ${role}\n` +
+                            `   � Level: ${user.level} | ${role}\n` +
                             `   📊 XP: ${user.xp} (${Math.floor(user.xp / 5)} msgs)\n\n`;
                     }
 
