@@ -4,6 +4,12 @@ const fs = require('fs');
 const path = require('path');
 const { createCanvas, loadImage } = require('canvas');
 
+// Ensure temp directory exists on startup
+const tempDir = './temp';
+if (!fs.existsSync(tempDir)) {
+  fs.mkdirSync(tempDir, { recursive: true });
+}
+
 // Template configurations
 const templates = {
   anime: {
@@ -89,7 +95,7 @@ async function createMeme(templateName, text) {
   }
 
   const config = templates[templateName];
-  const outputPath = path.join('./temp', `${templateName}_${Date.now()}.png`);
+  const outputPath = path.join(tempDir, `${templateName}_${Date.now()}.png`);
 
   const image = await loadImage(config.image);
   const canvas = createCanvas(image.width, image.height);
@@ -114,7 +120,11 @@ async function createMeme(templateName, text) {
     ctx.fillText(line, config.text.x, config.text.y + (i * 25));
   });
 
-  await fs.promises.mkdir('./temp', { recursive: true });
+  // Double-check directory exists before writing
+  if (!fs.existsSync(tempDir)) {
+    await fs.promises.mkdir(tempDir, { recursive: true });
+  }
+
   const out = fs.createWriteStream(outputPath);
   const stream = canvas.createPNGStream();
   stream.pipe(out);
