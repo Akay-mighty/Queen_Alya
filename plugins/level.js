@@ -67,9 +67,7 @@ async function initializeMongoDB() {
     }
 
     try {
-        await mongoose.connect(config.MONGODB, { 
-            useUnifiedTopology: true 
-        });
+        await mongoose.connect(config.MONGODB);
         levelState.mongoConnected = true;
         console.log('Connected to MongoDB for level system');
     } catch (error) {
