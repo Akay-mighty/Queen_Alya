@@ -300,7 +300,7 @@ bot(
                     
                 case 'profile':
                     try {
-                        const profileUser = message.mentionedJid?.[0] || message.sender;
+                        const profileUser = message.mentionedJid?.[0] || message.sender || message.quoted.sender;
                         const { name: profileName, jid: profileJid } = await getUserInfo(bot.sock, profileUser);
                         const messageCount = await calculateXP(bot.sock, profileUser, message.chat);
                         const userLevel = await updateUserLevel(profileUser, message.chat, messageCount);
@@ -332,7 +332,7 @@ bot(
                     
                 case 'rank':
                     try {
-                        const rankUser = message.mentionedJid?.[0] || message.sender;
+                        const rankUser = message.mentionedJid?.[0] || message.sender || message.quoted.sender;
                         const { name: rankName, jid: rankJid } = await getUserInfo(bot.sock, rankUser);
                         const rankMessageCount = await calculateXP(bot.sock, rankUser, message.chat);
                         const rankUserLevel = await updateUserLevel(rankUser, message.chat, rankMessageCount);
@@ -437,22 +437,22 @@ bot(
             if (messageCount > currentUser.lastMessageCount) {
                 const updatedUser = await updateUserLevel(message.sender, message.chat, messageCount);
                 
-                // Check for level up
-                if (updatedUser && updatedUser.level > currentUser.level) {
-                    const { name } = await getUserInfo(bot.sock, message.sender);
-                    const role = getRole(updatedUser.level);
-                    
-                    await bot.sock.sendMessage(message.chat, {
-                        text: `╭─────────────────────────────╮\n` +
-                              `│        🎉 *LEVEL UP!* 🎉\n` +
-                              `├─────────────────────────────┤\n` +
-                              `│ *User:* ${name}\n` +
-                              `│ *New Level:* ${updatedUser.level}\n` +
-                              `│ *New Role:* ${role}\n` +
-                              `│ *XP Progress:* ${updatedUser.xp}/${(updatedUser.level + 1) * 100}\n` +
-                              `╰─────────────────────────────╯\n` +
-                              `Congratulations on your achievement!`
-                    }, { quoted: message });
+if (updatedUser && updatedUser.level > currentUser.level) {
+    const { name } = await getUserInfo(bot.sock, message.sender);
+    const role = getRole(updatedUser.level);
+    
+    await bot.sock.sendMessage(message.chat, {
+        text: `╔════⪨\n` +
+              `║ *Wow, someone just*\n` +
+              `║ *leveled up huh⭐*\n` +
+              `║ *👤 Name:* ${name}\n` +
+              `║ *🎐 Level:* ${updatedUser.level}🍭\n` +
+              `║ *🛑 Exp:* ${updatedUser.xp} / ${(updatedUser.level + 1) * 100}\n` +
+              `║ *📍 Role:* *${role}*\n` +
+              `║ *Enjoy🥳*\n` +
+              `╚════════════⪨`
+    }, { quoted: message });
+}
                 }
             }
         } catch (error) {
