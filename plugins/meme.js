@@ -28,9 +28,13 @@ const templates = {
   anime: {
     image: path.join(memeDir, 'anime.png'),
     text: {
-      x: 50, y: 140,
-      maxWidth: 600, maxLines: 4,
-      fontSize: '35px', color: 'black'
+      x: 20, y: 100,
+      maxWidth: 650,
+      maxLines: 1,
+      fontSize: '60px',
+      color: 'black',
+      fontStyle: 'italic',
+      fontWeight: 'bold'
     }
   },
   trump: {
