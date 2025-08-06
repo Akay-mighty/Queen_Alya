@@ -26,19 +26,22 @@ ensureDirectories();
 // Template configurations with absolute paths
 const templates = {
   anime: {
-  image: path.join(memeDir, 'anime.png'),
-  text: {
-    x: 50,
-    y: 100,
-    maxWidth: 600,
-    maxLines: 4,
-    lineHeight: 50,
-    fontSize: '30px',
-    color: 'black',
-    fontStyle: 'italic',
-    fontWeight: 'bold'
-  }
-},
+    image: path.join(memeDir, 'anime.png'),
+    text: {
+      x: 70, // Position of the paper area
+      y: 50,
+      paperWidth: 160, // Width of the paper area
+      paperHeight: 110, // Height of the paper area
+      maxWidth: 140, // Max text width within paper
+      lineHeight: 18, // Line height for text
+      fontSize: '12px',
+      fontFamily: 'Arial',
+      textX: 75, // Text starting X position
+      textY: 70, // Text starting Y position
+      color: 'black',
+      bgColor: 'white'
+    }
+  },
   trump: {
     image: path.join(memeDir, 'trumSay.png'),
     text: {
@@ -128,23 +131,62 @@ async function createMeme(templateName, text) {
     const ctx = canvas.getContext('2d');
 
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-    ctx.font = config.text.fontSize + ' Arial';
-    ctx.fillStyle = config.text.color;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-
-    const lines = wrapText(text, ctx, config.text.maxWidth);
-    const displayLines = lines.slice(0, config.text.maxLines);
     
-    if (lines.length > config.text.maxLines) {
-      const lastLine = displayLines[displayLines.length - 1];
-      displayLines[displayLines.length - 1] = 
-        lastLine.slice(0, Math.max(0, lastLine.length - 10)) + '...';
-    }
+    // Special handling for anime template
+    if (templateName === 'anime') {
+      // Draw the paper background
+      ctx.fillStyle = config.text.bgColor;
+      ctx.fillRect(config.text.x, config.text.y, config.text.paperWidth, config.text.paperHeight);
+      
+      // Set text properties
+      ctx.fillStyle = config.text.color;
+      ctx.font = `${config.text.fontSize} ${config.text.fontFamily}`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      
+      const words = text.split(' ');
+      let line = '';
+      let y = config.text.textY;
+      
+      // Word wrapping logic
+      for (let i = 0; i < words.length; i++) {
+        const testLine = line + words[i] + ' ';
+        const metrics = ctx.measureText(testLine);
+        
+        if (metrics.width > config.text.maxWidth && i > 0) {
+          ctx.fillText(line, config.text.textX, y);
+          line = words[i] + ' ';
+          y += config.text.lineHeight;
+          
+          // Check if we've exceeded the paper height
+          if (y > config.text.y + config.text.paperHeight - config.text.lineHeight) {
+            break; // Stop drawing if we run out of space
+          }
+        } else {
+          line = testLine;
+        }
+      }
+      ctx.fillText(line, config.text.textX, y); // Draw the last line
+    } else {
+      // Original handling for other templates
+      ctx.font = config.text.fontSize + ' Arial';
+      ctx.fillStyle = config.text.color;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
 
-    displayLines.forEach((line, i) => {
-      ctx.fillText(line, config.text.x, config.text.y + (i * 25));
-    });
+      const lines = wrapText(text, ctx, config.text.maxWidth);
+      const displayLines = lines.slice(0, config.text.maxLines);
+      
+      if (lines.length > config.text.maxLines) {
+        const lastLine = displayLines[displayLines.length - 1];
+        displayLines[displayLines.length - 1] = 
+          lastLine.slice(0, Math.max(0, lastLine.length - 10)) + '...';
+      }
+
+      displayLines.forEach((line, i) => {
+        ctx.fillText(line, config.text.x, config.text.y + (i * 25));
+      });
+    }
 
     // Ensure temp directory exists
     if (!fs.existsSync(tempDir)) {
