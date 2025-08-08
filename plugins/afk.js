@@ -1,6 +1,7 @@
 const bot = require("../lib/plugin");
 const fs = require('fs');
 const path = require('path');
+const { resolveLidToJid } = require("../lib/serialize");
 
 // AFK state
 const afkState = {
@@ -51,19 +52,28 @@ function formatDuration(startTime) {
     return duration.join(' ');
 }
 
-// Helper function to check if owner is mentioned
-async function isOwnerMentioned(message) {
+// Improved function to check if owner is mentioned
+async function isOwnerMentioned(message, bot) {
     try {
         if (!message.text) return false;
         
-        // Extract all mentions from message
-        const mentions = message.mentionedJid || [];
-        if (mentions.length === 0) return false;
+        // Skip if it's a newsletter chat
+        if (message.chat?.endsWith('@newsletter')) return false;
         
-        // Check each mentioned JID
-        for (const mention of mentions) {
-            if (await message.isOwner(mention)) {
-                return true;
+        // Extract all mentions from message text (like @11343916282283)
+        const mentionMatches = message.text.match(/@\d+/g) || [];
+        if (mentionMatches.length === 0) return false;
+        
+        // Check each mentioned LID (like @11343916282283)
+        for (const lid of mentionMatches) {
+            try {
+                const jid = await resolveLidToJid(bot.sock, lid);
+                if (await message.isOwner(jid)) {
+                    return true;
+                }
+            } catch (error) {
+                console.error('Error resolving LID to JID:', error);
+                continue;
             }
         }
         
@@ -173,6 +183,9 @@ bot(
             // Skip if AFK is disabled or message is from the bot itself
             if (config.AFK !== "true" || message.key?.fromMe) return;
             
+            // Skip newsletter chats
+            if (message.chat?.endsWith('@newsletter')) return;
+            
             const sender = message.sender;
             
             // Check if sender is owner (with proper verification)
@@ -197,8 +210,8 @@ bot(
                 return;
             }
             
-            // Check if owner is mentioned in the message
-            const ownerMentioned = await isOwnerMentioned(message);
+            // Check if owner is mentioned in the message using the improved function
+            const ownerMentioned = await isOwnerMentioned(message, bot);
             const isGroup = message.chat?.endsWith('@g.us') ?? false;
             
             // Respond only if:
