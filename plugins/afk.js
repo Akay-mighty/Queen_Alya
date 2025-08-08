@@ -64,14 +64,10 @@ async function isOwnerMentioned(message, bot) {
         const mentionMatches = message.text.match(/@\d+/g) || [];
         if (mentionMatches.length === 0) return false;
         
-        // Get owner JID(s) from config
-        const config = require(afkState.configFile);
-        const ownerJids = Array.isArray(config.OWNER) ? config.OWNER : [config.OWNER];
-        
         for (const lid of mentionMatches) {
             try {
                 const jid = await resolveLidToJid(bot.sock, lid);
-                if (jid && ownerJids.includes(jid)) {
+                if (jid && await message.isOwner(jid)) {
                     return true;
                 }
             } catch (error) {
