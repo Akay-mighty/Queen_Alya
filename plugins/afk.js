@@ -7,7 +7,8 @@ const { resolveLidToJid } = require("../lib/serialize");
 const afkState = {
     afkStartTimes: new Map(),
     configFile: path.join(__dirname, '..', 'config.js'),
-    globalAFKStartTime: null
+    globalAFKStartTime: null,
+    ownerJid: null // Store owner's JID when AFK is enabled
 };
 
 // File watcher to reload config changes
@@ -52,22 +53,37 @@ function formatDuration(startTime) {
     return duration.join(' ');
 }
 
-// Improved function to check if owner is mentioned
+// Function to check if owner is mentioned in a message
 async function isOwnerMentioned(message, bot) {
     try {
-        if (!message.text) return false;
+        if (!message.text || !afkState.ownerJid) return false;
         
         // Skip if it's a newsletter chat
         if (message.chat?.endsWith('@newsletter')) return false;
         
-        // Extract all mentions from message text (like @11343916282283)
-        const mentionMatches = message.text.match(/@\d+/g) || [];
-        if (mentionMatches.length === 0) return false;
+        // Check direct mentions in contextInfo
+        if (message.fakeObj?.message?.extendedTextMessage?.contextInfo?.mentionedJid) {
+            const mentionedLids = message.fakeObj.message.extendedTextMessage.contextInfo.mentionedJid;
+            
+            for (const lid of mentionedLids) {
+                try {
+                    const jid = await resolveLidToJid(bot.sock, lid);
+                    if (jid === afkState.ownerJid) {
+                        return true;
+                    }
+                } catch (error) {
+                    console.error('Error resolving LID to JID:', error);
+                    continue;
+                }
+            }
+        }
         
+        // Also check for @mentions in text (like @123456789)
+        const mentionMatches = message.text.match(/@\d+/g) || [];
         for (const lid of mentionMatches) {
             try {
                 const jid = await resolveLidToJid(bot.sock, lid);
-                if (jid && await message.isOwner(jid)) {
+                if (jid === afkState.ownerJid) {
                     return true;
                 }
             } catch (error) {
@@ -118,6 +134,7 @@ bot(
                     const now = Date.now();
                     afkState.afkStartTimes.set(sender, now);
                     afkState.globalAFKStartTime = now;
+                    afkState.ownerJid = sender; // Store owner's JID
                     return await bot.reply(`AFK mode has been enabled.\nReason: ${reason}`);
                 } else {
                     return await bot.reply("Failed to enable AFK mode.");
@@ -134,8 +151,10 @@ bot(
                     if (startTime) {
                         const duration = formatDuration(startTime);
                         afkState.afkStartTimes.delete(sender);
+                        afkState.ownerJid = null; // Clear owner's JID
                         return await bot.reply(`AFK mode has been disabled.\nYou were AFK for ${duration}.`);
                     }
+                    afkState.ownerJid = null; // Clear owner's JID
                     return await bot.reply("AFK mode has been disabled.");
                 } else {
                     return await bot.reply("Failed to disable AFK mode.");
@@ -186,6 +205,7 @@ bot(
             if (message.chat?.endsWith('@newsletter')) return;
             
             const sender = message.sender;
+            const isGroup = message.chat?.endsWith('@g.us') ?? false;
             
             // Check if sender is owner (with proper verification)
             const isOwner = await message.isOwner(sender);
@@ -202,6 +222,7 @@ bot(
                         AFK_REASON: ""
                     });
                     afkState.afkStartTimes.delete(sender);
+                    afkState.ownerJid = null;
                     
                     // Send welcome back message
                     await bot.reply(`*Welcome back!*\nYou were AFK for ${duration}.\nReason: ${reason}`);
@@ -209,14 +230,13 @@ bot(
                 return;
             }
             
-            // Check if owner is mentioned in the message using the improved function
+            // Check if owner is mentioned in the message
             const ownerMentioned = await isOwnerMentioned(message, bot);
-            const isGroup = message.chat?.endsWith('@g.us') ?? false;
             
             // Respond only if:
             // 1. Owner is mentioned in a group, OR
             // 2. It's a PM (non-group chat)
-            if ((isGroup && ownerMentioned) || !isGroup) {
+            if ((isGroup && ownerMentioned) || (!isGroup && afkState.ownerJid)) {
                 const startTime = afkState.globalAFKStartTime || Date.now();
                 const duration = formatDuration(startTime);
                 const reason = config.AFK_REASON || "I'm AFK right now";
