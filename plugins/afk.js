@@ -1,240 +1,117 @@
 const bot = require("../lib/plugin");
 const fs = require('fs');
 const path = require('path');
-const { resolveLidToJid } = require("../lib/serialize");
+const configPath = path.join(__dirname, '../config.js');
+const config = require('../config');
 
-// AFK state
-const afkState = {
-    afkStartTimes: new Map(),
-    configFile: path.join(__dirname, '..', 'config.js'),
-    globalAFKStartTime: null,
-    ownerJid: null // Store owner's JID when AFK is enabled
-};
+// AFK data storage
+const afkUsers = {};
 
-// File watcher to reload config changes
-fs.watch(afkState.configFile, (eventType, filename) => {
+// Watch for config file changes
+fs.watch(configPath, (eventType, filename) => {
     if (eventType === 'change') {
         try {
-            delete require.cache[require.resolve(afkState.configFile)];
-        } catch (error) {
-            console.error('AFK: Error reloading config:', error);
+            delete require.cache[require.resolve('../config')];
+            const newConfig = require('../config');
+            Object.assign(config, newConfig);
+            console.log('Config file reloaded');
+        } catch (err) {
+            console.error('Error reloading config:', err);
         }
     }
 });
 
-// Function to update config
-function updateConfig(newValues) {
+// AFK command handler
+bot(
+    {
+        pattern: 'afk',
+        fromMe: true,
+        desc: 'Set AFK status with optional reason',
+        usage: 'afk | reason'
+    },
+    async (message, bot) => {
+        if (!message.chat.endsWith('@g.us') || message.chat.endsWith('@newsletter')) {
+            return await bot.reply('AFK mode only works in groups');
+        }
+
+        const [_, reason] = message.text.split('|').map(s => s.trim());
+        const afkReason = reason || config.AFK_REASON;
+        const userId = message.sender;
+
+        afkUsers[userId] = {
+            startTime: Date.now(),
+            reason: afkReason,
+            chat: message.chat
+        };
+
+        // Update config if AFK was off
+        if (config.AFK === "false") {
+            updateConfig('AFK', 'true');
+            if (reason) updateConfig('AFK_REASON', afkReason);
+        }
+
+        await bot.reply(`AFK mode activated. Reason: ${afkReason}`);
+    }
+);
+
+// Message handler for AFK responses
+bot(
+    {
+        on: 'text',
+        fromMe: false,
+    },
+    async (message, bot) => {
+        if (!config.AFK || config.AFK === "false") return;
+        if (!message.chat.endsWith('@g.us') || message.chat.endsWith('@newsletter')) return;
+
+        const userId = message.sender;
+        const mentionedUsers = message.mentionedJid || [];
+
+        // Check if user is returning from AFK
+        if (afkUsers[userId] && afkUsers[userId].chat === message.chat) {
+            const afkData = afkUsers[userId];
+            const duration = formatDuration(Date.now() - afkData.startTime);
+            
+            delete afkUsers[userId];
+            await bot.reply(`Welcome back ${message.pushName}! You were AFK for ${duration}.`);
+            return;
+        }
+
+        // Check if any mentioned users are AFK
+        for (const mentionedId of mentionedUsers) {
+            if (afkUsers[mentionedId] && afkUsers[mentionedId].chat === message.chat) {
+                const afkData = afkUsers[mentionedId];
+                const duration = formatDuration(Date.now() - afkData.startTime);
+                
+                await bot.reply(
+                    `@${mentionedId.split('@')[0]} is AFK (for ${duration}). Reason: ${afkData.reason}`,
+                    { mentions: [mentionedId] }
+                );
+            }
+        }
+    }
+);
+
+// Helper function to update config.js
+function updateConfig(key, value) {
     try {
-        const config = require(afkState.configFile);
-        const updatedConfig = {...config, ...newValues};
-        fs.writeFileSync(afkState.configFile, `module.exports = ${JSON.stringify(updatedConfig, null, 2)};`);
-        delete require.cache[require.resolve(afkState.configFile)];
-        return true;
-    } catch (error) {
-        console.error('AFK: Error updating config:', error);
-        return false;
+        let configContent = fs.readFileSync(configPath, 'utf8');
+        const regex = new RegExp(`(${key}:\\s*")([^"]*)(")`);
+        configContent = configContent.replace(regex, `$1${value}$3`);
+        fs.writeFileSync(configPath, configContent);
+        console.log(`Updated config: ${key} = ${value}`);
+    } catch (err) {
+        console.error('Error updating config:', err);
     }
 }
 
 // Helper function to format duration
-function formatDuration(startTime) {
-    const seconds = Math.floor((Date.now() - startTime) / 1000);
-    const days = Math.floor(seconds / (3600 * 24));
-    const hours = Math.floor((seconds % (3600 * 24)) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
+function formatDuration(ms) {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
     
-    let duration = [];
-    if (days > 0) duration.push(`${days} day${days > 1 ? 's' : ''}`);
-    if (hours > 0) duration.push(`${hours} hour${hours > 1 ? 's' : ''}`);
-    if (minutes > 0) duration.push(`${minutes} minute${minutes > 1 ? 's' : ''}`);
-    if (secs > 0 || duration.length === 0) duration.push(`${secs} second${secs !== 1 ? 's' : ''}`);
-    
-    return duration.join(' ');
+    if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''}`;
+    if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''}`;
+    return `${seconds} second${seconds !== 1 ? 's' : ''}`;
 }
-
-// Improved function to check if owner is mentioned in a message
-async function isOwnerMentioned(message, bot) {
-    try {
-        if (!message.text || !afkState.ownerJid) return false;
-        
-        // Skip if it's a newsletter chat
-        if (message.chat?.endsWith('@newsletter')) return false;
-        
-        // Check direct mentions in message object (new method)
-        if (message.mentionedJid && message.mentionedJid.includes(afkState.ownerJid)) {
-            return true;
-        }
-        
-        // Check for @mentions in text (like @123456789) as fallback
-        const mentionMatches = message.text.match(/@\d+/g) || [];
-        for (const mention of mentionMatches) {
-            try {
-                const jid = await resolveLidToJid(bot.sock, mention);
-                if (jid === afkState.ownerJid) {
-                    return true;
-                }
-            } catch (error) {
-                console.error('Error resolving mention to JID:', error);
-                continue;
-            }
-        }
-        
-        return false;
-    } catch (error) {
-        console.error('Error checking owner mention:', error);
-        return false;
-    }
-}
-
-bot(
-    {
-        name: "afk",
-        info: "Manages AFK settings",
-        category: "owner",
-        usage: [
-            "afk [on|off] [reason] - Toggle AFK with optional reason",
-            "afk reason [new reason] - Update AFK reason"
-        ]
-    },
-    async (message, bot) => {
-        const query = message.query?.trim() || '';
-        
-        // Check if message is from owner
-        const isOwner = await message.isOwner(message.sender);
-        if (!isOwner) {
-            return await bot.reply("This command is only available to the bot owner.");
-        }
-        const sender = message.sender;
-
-        const [action, ...rest] = query.split(' ');
-        const reasonText = rest.join(' ');
-
-        switch (action) {
-            case 'on':
-                const reason = reasonText || "I'm AFK right now";
-                const onSuccess = updateConfig({ 
-                    AFK: "true",
-                    AFK_REASON: reason
-                });
-                
-                if (onSuccess) {
-                    const now = Date.now();
-                    afkState.afkStartTimes.set(sender, now);
-                    afkState.globalAFKStartTime = now;
-                    afkState.ownerJid = sender; // Store owner's JID
-                    return await bot.reply(`AFK mode has been enabled.\nReason: ${reason}`);
-                } else {
-                    return await bot.reply("Failed to enable AFK mode.");
-                }
-                
-            case 'off':
-                const offSuccess = updateConfig({ 
-                    AFK: "false",
-                    AFK_REASON: ""
-                });
-                
-                if (offSuccess) {
-                    const startTime = afkState.afkStartTimes.get(sender);
-                    if (startTime) {
-                        const duration = formatDuration(startTime);
-                        afkState.afkStartTimes.delete(sender);
-                        afkState.ownerJid = null; // Clear owner's JID
-                        return await bot.reply(`AFK mode has been disabled.\nYou were AFK for ${duration}.`);
-                    }
-                    afkState.ownerJid = null; // Clear owner's JID
-                    return await bot.reply("AFK mode has been disabled.");
-                } else {
-                    return await bot.reply("Failed to disable AFK mode.");
-                }
-                
-            case 'reason':
-                if (!reasonText) {
-                    const config = require(afkState.configFile);
-                    return await bot.reply(`Current AFK reason: ${config.AFK_REASON || "Not set"}`);
-                }
-                
-                const reasonSuccess = updateConfig({ AFK_REASON: reasonText });
-                
-                if (reasonSuccess) {
-                    return await bot.reply(`AFK reason updated to: ${reasonText}`);
-                } else {
-                    return await bot.reply("Failed to update AFK reason.");
-                }
-                
-            default:
-                const config = require(afkState.configFile);
-                return await bot.reply(`AFK Status: ${config.AFK === "true" ? 'ON' : 'OFF'}\n` +
-                    (config.AFK === "true" ? `Reason: ${config.AFK_REASON || "Not specified"}\n` : '') +
-                    `\nUsage:\n` +
-                    `${config.PREFIX}afk on [reason] - Enable AFK mode\n` +
-                    `${config.PREFIX}afk off - Disable AFK mode\n` +
-                    `${config.PREFIX}afk reason [new reason] - Update AFK reason`
-                );
-        }
-    }
-);
-
-// AFK message listener for mentions and PMs
-bot(
-    {
-        on: 'text',
-        fromMe: false, // Ensure bot doesn't respond to its own messages
-        name: "afk-listener",
-        ignoreRestrictions: true
-    },
-    async (message, bot) => {
-        try {
-            const config = require(afkState.configFile);
-            
-            // Skip if AFK is disabled
-            if (config.AFK !== "true") return;
-            
-            // Skip newsletter chats
-            if (message.chat?.endsWith('@newsletter')) return;
-            
-            const sender = message.sender;
-            const isGroup = message.chat?.endsWith('@g.us') ?? false;
-            
-            // Check if sender is owner (with proper verification)
-            const isOwner = await message.isOwner(sender);
-            if (isOwner) {
-                // If owner sends any message and was AFK, welcome them back
-                if (afkState.afkStartTimes.has(sender)) {
-                    const startTime = afkState.afkStartTimes.get(sender);
-                    const duration = formatDuration(startTime);
-                    const reason = config.AFK_REASON || "No reason specified";
-                    
-                    // Disable AFK
-                    updateConfig({ 
-                        AFK: "false",
-                        AFK_REASON: ""
-                    });
-                    afkState.afkStartTimes.delete(sender);
-                    afkState.ownerJid = null;
-                    
-                    // Send welcome back message
-                    await bot.reply(`*Welcome back!*\nYou were AFK for ${duration}.\nReason: ${reason}`);
-                }
-                return;
-            }
-            
-            // Check if owner is mentioned in the message
-            const ownerMentioned = await isOwnerMentioned(message, bot);
-            
-            // Respond only if:
-            // 1. Owner is mentioned in a group, OR
-            // 2. It's a PM (non-group chat)
-            if ((isGroup && ownerMentioned) || (!isGroup && afkState.ownerJid)) {
-                const startTime = afkState.globalAFKStartTime || Date.now();
-                const duration = formatDuration(startTime);
-                const reason = config.AFK_REASON || "I'm AFK right now";
-                
-                await bot.reply(`*AFK*\nI'm currently AFK (for ${duration}).\nReason: ${reason}\nI'll respond when I'm back.`);
-            }
-            
-        } catch (error) {
-            console.error('AFK: Error in listener:', error);
-        }
-    }
-);
