@@ -53,7 +53,7 @@ function formatDuration(startTime) {
     return duration.join(' ');
 }
 
-// Function to check if owner is mentioned in a message
+// Improved function to check if owner is mentioned in a message
 async function isOwnerMentioned(message, bot) {
     try {
         if (!message.text || !afkState.ownerJid) return false;
@@ -61,33 +61,21 @@ async function isOwnerMentioned(message, bot) {
         // Skip if it's a newsletter chat
         if (message.chat?.endsWith('@newsletter')) return false;
         
-        // Check direct mentions in contextInfo
-        if (message.fakeObj?.message?.extendedTextMessage?.contextInfo?.mentionedJid) {
-            const mentionedLids = message.fakeObj.message.extendedTextMessage.contextInfo.mentionedJid;
-            
-            for (const lid of mentionedLids) {
-                try {
-                    const jid = await resolveLidToJid(bot.sock, lid);
-                    if (jid === afkState.ownerJid) {
-                        return true;
-                    }
-                } catch (error) {
-                    console.error('Error resolving LID to JID:', error);
-                    continue;
-                }
-            }
+        // Check direct mentions in message object (new method)
+        if (message.mentionedJid && message.mentionedJid.includes(afkState.ownerJid)) {
+            return true;
         }
         
-        // Also check for @mentions in text (like @123456789)
+        // Check for @mentions in text (like @123456789) as fallback
         const mentionMatches = message.text.match(/@\d+/g) || [];
-        for (const lid of mentionMatches) {
+        for (const mention of mentionMatches) {
             try {
-                const jid = await resolveLidToJid(bot.sock, lid);
+                const jid = await resolveLidToJid(bot.sock, mention);
                 if (jid === afkState.ownerJid) {
                     return true;
                 }
             } catch (error) {
-                console.error('Error resolving LID to JID:', error);
+                console.error('Error resolving mention to JID:', error);
                 continue;
             }
         }
@@ -191,6 +179,7 @@ bot(
 bot(
     {
         on: 'text',
+        fromMe: false, // Ensure bot doesn't respond to its own messages
         name: "afk-listener",
         ignoreRestrictions: true
     },
@@ -198,8 +187,8 @@ bot(
         try {
             const config = require(afkState.configFile);
             
-            // Skip if AFK is disabled or message is from the bot itself
-            if (config.AFK !== "true" || message.key?.fromMe) return;
+            // Skip if AFK is disabled
+            if (config.AFK !== "true") return;
             
             // Skip newsletter chats
             if (message.chat?.endsWith('@newsletter')) return;
