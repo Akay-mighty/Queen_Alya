@@ -297,7 +297,6 @@ async function downloadSessionFilesFromSupabase(sessionFolderName) {
             const filePath = path.join(sessionFolder, file.name);
             
             fs.writeFileSync(filePath, buffer);
-            console.log(`Downloaded session file: ${file.name}`);
         }
 
         console.log(`Session files successfully downloaded to ${sessionFolder}`);
@@ -477,11 +476,11 @@ async function startBot() {
 
         if (!hasValidCreds && sessionId) {
             try {
-                console.log("No valid local session found, attempting to download from Supabase...");
+                console.log("No valid local session found, attempting to download from database");
                 await downloadSessionFilesFromSupabase(sessionId);
                 hasValidCreds = await hasValidLocalSession();
             } catch (supabaseError) {
-                console.log(`Failed to download from Supabase: ${supabaseError.message}`);
+                console.log(`Failed to download from database: ${supabaseError.message}`);
             }
         }
 
