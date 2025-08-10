@@ -27,30 +27,52 @@ bot(
     {
         name: 'afk',
         desc: 'Set AFK status with optional reason',
-        usage: 'afk | reason'
+        usage: 'afk [reason] or afk | reason'
     },
     async (message, bot) => {
         if (!message.chat.endsWith('@g.us') || message.chat.endsWith('@newsletter')) {
             return await bot.reply('AFK mode only works in groups');
         }
 
-        const [_, reason] = message.text.split('|').map(s => s.trim());
-        const afkReason = reason || config.AFK_REASON;
+        // Handle case when no reason is provided
+        if (!message.query || message.query.trim() === '') {
+            const afkReason = config.AFK_REASON || 'I am away';
+            const userId = message.sender;
+
+            afkUsers[userId] = {
+                startTime: Date.now(),
+                reason: afkReason,
+                chat: message.chat
+            };
+
+            // Update config if AFK was off
+            if (config.AFK === "false") {
+                updateConfig('AFK', 'true');
+            }
+
+            return await bot.reply(`AFK mode activated. Reason: ${afkReason}`);
+        }
+
+        // Handle when reason is provided (either space separated or after |)
+        const reason = message.query.includes('|') 
+            ? message.query.split('|')[1].trim()
+            : message.query.trim();
+
         const userId = message.sender;
 
         afkUsers[userId] = {
             startTime: Date.now(),
-            reason: afkReason,
+            reason: reason,
             chat: message.chat
         };
 
         // Update config if AFK was off
         if (config.AFK === "false") {
             updateConfig('AFK', 'true');
-            if (reason) updateConfig('AFK_REASON', afkReason);
+            updateConfig('AFK_REASON', reason);
         }
 
-        await bot.reply(`AFK mode activated. Reason: ${afkReason}`);
+        await bot.reply(`AFK mode activated. Reason: ${reason}`);
     }
 );
 
@@ -92,7 +114,6 @@ bot(
         }
 
         // Check if any mentioned users are AFK
-        let hasAFKMentions = false;
         for (const mentionedId of mentionedUsers) {
             if (afkUsers[mentionedId] && afkUsers[mentionedId].chat === message.chat) {
                 const afkData = afkUsers[mentionedId];
@@ -102,13 +123,7 @@ bot(
                     `@${mentionedId.split('@')[0]} is AFK (for ${duration}). Reason: ${afkData.reason}`,
                     { mentions: [mentionedId] }
                 );
-                hasAFKMentions = true;
             }
-        }
-
-        // If no mentions and no query, send a general reply
-        if (!hasAFKMentions && mentionedUsers.length === 0 && message.text.trim().length > 0) {
-            await bot.reply("You didn't mention anyone. If you want to set AFK status, use the command: .afk [reason]");
         }
     }
 );
