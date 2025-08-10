@@ -24,8 +24,7 @@ fs.watch(configPath, (eventType, filename) => {
 // AFK command handler
 bot(
     {
-        pattern: 'afk',
-        fromMe: true,
+        name: 'afk',
         desc: 'Set AFK status with optional reason',
         usage: 'afk | reason'
     },
