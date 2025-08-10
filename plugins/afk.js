@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const configPath = path.join(__dirname, '../config.js');
 const config = require('../config');
+const { resolveLidToJid } = require("../lib/serialize");
 
 // AFK data storage
 const afkUsers = {};
@@ -64,7 +65,21 @@ bot(
         if (!message.chat.endsWith('@g.us') || message.chat.endsWith('@newsletter')) return;
 
         const userId = message.sender;
-        const mentionedUsers = message.mentionedJid || [];
+        let mentionedUsers = message.mentionedJid || [];
+
+        // Resolve any LID mentions to JID
+        if (message.contextInfo && message.contextInfo.mentionedJid) {
+            for (const lid of message.contextInfo.mentionedJid) {
+                try {
+                    const jid = await resolveLidToJid(bot.sock, lid);
+                    if (jid && !mentionedUsers.includes(jid)) {
+                        mentionedUsers.push(jid);
+                    }
+                } catch (err) {
+                    console.error('Error resolving LID to JID:', err);
+                }
+            }
+        }
 
         // Check if user is returning from AFK
         if (afkUsers[userId] && afkUsers[userId].chat === message.chat) {
@@ -77,6 +92,7 @@ bot(
         }
 
         // Check if any mentioned users are AFK
+        let hasAFKMentions = false;
         for (const mentionedId of mentionedUsers) {
             if (afkUsers[mentionedId] && afkUsers[mentionedId].chat === message.chat) {
                 const afkData = afkUsers[mentionedId];
@@ -86,7 +102,13 @@ bot(
                     `@${mentionedId.split('@')[0]} is AFK (for ${duration}). Reason: ${afkData.reason}`,
                     { mentions: [mentionedId] }
                 );
+                hasAFKMentions = true;
             }
+        }
+
+        // If no mentions and no query, send a general reply
+        if (!hasAFKMentions && mentionedUsers.length === 0 && message.text.trim().length > 0) {
+            await bot.reply("You didn't mention anyone. If you want to set AFK status, use the command: .afk [reason]");
         }
     }
 );
