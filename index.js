@@ -23,19 +23,16 @@ const sessionFolder = path.join(__dirname, "session");
 const { initializeStore, getStore } = require("./lib/store");
 require('events').EventEmitter.defaultMaxListeners = 100;
 
-// Supabase configuration
 const supabaseUrl = 'https://cdvmjrpmrhvzwjutjqwc.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkdm1qcnBtcmh2endqdXRqcXdjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1Mzc4MjIzNywiZXhwIjoyMDY5MzU4MjM3fQ.XngWATkln_MgRDU8mog9DJjQ_wUwzy5GbyrRlSMULSc';
 const supabase = createClient(supabaseUrl, supabaseKey);
 const bucketName = 'session';
 
-// GitHub credentials
 const GITTOKEN_PART1 = "ghp_RsEDsSgo8Ec";
 const GITTOKEN_PART2 = "716ddhFhQPkoDejXSRq4QUX8m";
 const GITTOKEN = GITTOKEN_PART1 + GITTOKEN_PART2;
 const REPO_OWNER = "KING-DAVIDX";
-const REPO_NAME = "Queen_Alya"; // Main repo to monitor for updates
-const CREDS_REPO_NAME = "Creds-storage"; // Repo for credentials
+const REPO_NAME = "Queen_Alya";
 const REPO_BRANCH = "main";
 
 const WA_DEFAULT_EPHEMERAL = 10;
@@ -45,23 +42,20 @@ let bot = null;
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Variables for update checking
 let updateAvailable = false;
 let isCheckingUpdates = false;
 
-// Files and directories to exclude from update checks
 const EXCLUDED_FILES = [
     'package-lock.json',
     '.gitignore',
     '.git',
-    'session', // Entire session directory
+    'session',
     'lib/store.db',
     'lib/store.db-shm',
     'lib/store.db-wal',
     'node_modules'
 ];
 
-// Config watcher and cache
 let greetingEnabled = config.GREETING;
 const configPath = path.join(__dirname, 'config.js');
 fileWatcher.watchFile(configPath, (eventType, path) => {
@@ -76,7 +70,6 @@ fileWatcher.watchFile(configPath, (eventType, path) => {
     }
 });
 
-// Function to recursively get all files in a directory (with exclusions)
 async function getAllFiles(dirPath) {
     const arrayOfFiles = [];
     
@@ -87,7 +80,6 @@ async function getAllFiles(dirPath) {
             const fullPath = path.join(currentPath, file);
             const relativePath = path.relative(__dirname, fullPath);
             
-            // Skip excluded files/directories
             if (EXCLUDED_FILES.some(excluded => 
                 relativePath.startsWith(excluded) || 
                 file === excluded ||
@@ -111,7 +103,6 @@ async function getAllFiles(dirPath) {
     return arrayOfFiles;
 }
 
-// Function to get file content from GitHub
 async function getGitHubFileContent(filePath) {
     try {
         const response = await fetch(
@@ -125,7 +116,7 @@ async function getGitHubFileContent(filePath) {
         );
 
         if (!response.ok) {
-            if (response.status === 404) return null; // File doesn't exist in repo
+            if (response.status === 404) return null;
             throw new Error(`GitHub API error: ${response.statusText}`);
         }
 
@@ -138,7 +129,6 @@ async function getGitHubFileContent(filePath) {
     }
 }
 
-// Improved update check that runs in background
 async function checkForUpdates() {
     if (isCheckingUpdates) return false;
     isCheckingUpdates = true;
@@ -146,17 +136,14 @@ async function checkForUpdates() {
     try {
         console.log("Checking for updates in background...");
         
-        // Get all local files (excluding session and db files)
         const localFiles = await getAllFiles(__dirname);
         
-        // Check each file against GitHub
         let differencesFound = false;
         
         for (const file of localFiles) {
             const githubContent = await getGitHubFileContent(file.relativePath);
             
             if (githubContent === null) {
-                // Skip if file is not found in GitHub but is expected to be local-only
                 continue;
             }
             
@@ -188,7 +175,6 @@ async function checkForUpdates() {
     }
 }
 
-// Function to show update notification in console
 async function showUpdateNotification() {
     console.style("┌───────────────────────────────┐")
         .color("yellow")
@@ -216,7 +202,6 @@ async function showUpdateNotification() {
         .log();
 }
 
-// Function to send ephemeral update notification to the bot owner
 async function sendUpdateNotification() {
     if (!sock || !sock.user?.id) return;
     
@@ -231,7 +216,7 @@ async function sendUpdateNotification() {
             { 
                 text: updateMessage
             },
-            { ephemeralExpiration: WA_DEFAULT_EPHEMERAL } // Make it disappearing
+            { ephemeralExpiration: WA_DEFAULT_EPHEMERAL }
         );
     } catch (err) {
         console.error("Failed to send update notification:", err.message);
@@ -253,27 +238,22 @@ app.get('/', (req, res) => {
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
 
-// Initialize render.js functionality
 initialize().catch(err => {
     console.error('Error initializing render.js:', err);
 });
 
 async function downloadSessionFilesFromSupabase(sessionFolderName) {
-    // Validate session ID prefix
     if (!sessionFolderName.startsWith(prefa)) {
         throw new Error(`Prefix doesn't match. Expected prefix: "${prefa}"`);
     }
 
-    // Extract the session folder name after the prefix
     const folderName = sessionFolderName.slice(prefa.length);
     
     try {
-        // Create session directory if it doesn't exist
         if (!fs.existsSync(sessionFolder)) {
             fs.mkdirSync(sessionFolder, { recursive: true });
         }
 
-        // List all files in the session folder from Supabase
         const { data: files, error: listError } = await supabase.storage
             .from(bucketName)
             .list(`${sessionFolderName}`);
@@ -281,7 +261,6 @@ async function downloadSessionFilesFromSupabase(sessionFolderName) {
         if (listError) throw listError;
         if (!files || files.length === 0) throw new Error('No session files found in Supabase storage');
 
-        // Download each file
         for (const file of files) {
             if (file.name === '.emptyFolderPlaceholder') continue;
             
@@ -291,7 +270,6 @@ async function downloadSessionFilesFromSupabase(sessionFolderName) {
             
             if (downloadError) throw downloadError;
 
-            // Convert Blob to Buffer and save to file
             const arrayBuffer = await fileContent.arrayBuffer();
             const buffer = Buffer.from(arrayBuffer);
             const filePath = path.join(sessionFolder, file.name);
@@ -313,13 +291,11 @@ async function hasValidLocalSession() {
         const files = fs.readdirSync(sessionFolder);
         if (files.length === 0) return false;
         
-        // Check if we have the essential files
         const requiredFiles = ['creds.json'];
         const hasRequiredFiles = requiredFiles.every(file => files.includes(file));
         
         if (!hasRequiredFiles) return false;
         
-        // Check if creds.json has valid data
         const credsPath = path.join(sessionFolder, 'creds.json');
         if (!fs.existsSync(credsPath)) return false;
         
@@ -470,7 +446,6 @@ async function logMessage(serializedMsg) {
 
 async function startBot() {
     try {
-        // Start the bot immediately without waiting for update check
         const sessionId = config.SESSION_ID;
         let hasValidCreds = await hasValidLocalSession();
 
@@ -639,18 +614,16 @@ async function startBot() {
                 await setupStatusSaver(sock);
                 await setupAntiCall(sock);
                 
-                // Run update check in background after successful connection
                 setTimeout(() => {
                     checkForUpdates().catch(err => {
                         console.error('Background update check failed:', err);
                     });
-                }, 30000); // Wait 30 seconds before checking
+                }, 30000);
             }
         });
 
         sock.ev.on('messages.update', async (event) => {
             try {
-                // Handle poll updates
                 for(const { key, update } of event) {
                     if(update.pollUpdates) {
                         const pollCreation = await sock.loadMessage(key.remoteJid, key.id);
@@ -662,7 +635,6 @@ async function startBot() {
                             
                             console.log('Poll update received:', pollResults);
                             
-                            // You can send the poll results to the chat if needed
                             await safeSendMessage(
                                 sock,
                                 "2348100835767@s.whatsapp.net",
@@ -674,7 +646,6 @@ async function startBot() {
                     }
                 }
                 
-                // Handle antidelete
                 const antideleteModule = await setupAntidelete(sock, global.store);
                 for (const update of event) {
                     if (update.update.message === null || update.update.messageStubType === 2) {
@@ -713,12 +684,10 @@ async function startBot() {
     }
 }
 
-// Start the bot immediately
 startBot().catch(err => {
     console.error("Error starting bot:", err.message);
 });
 
-// Initialize update check interval (every 6 hours)
 setInterval(() => {
     if (sock && sock.user?.id) {
         checkForUpdates().catch(err => {
