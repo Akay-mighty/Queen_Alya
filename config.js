@@ -5,13 +5,13 @@ const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const config = {
-  SESSION_ID: "ALYA-4ac088eedf29266e" || process.env.SESSION_ID,
+  SESSION_ID: "ALYA-4f155a50d636f96d" || process.env.SESSION_ID,
   PREFIX: "." || process.env.PREFIX,
   BOT_NAME: "QUEEN_ALYA" || process.env.BOT_NAME,
-  OWNER_NAME: "KING" || process.env.OWNER_NAME,
+  OWNER_NAME: "Emmanuella" || process.env.OWNER_NAME,
   CAPTION: "> QUEEN ALYA" || process.env.CAPTION,
   MODE: "private" || process.env.MODE,
-  OWNER_NUMBER: "2349112171078" || process.env.OWNER_NUMBER,
+  OWNER_NUMBER: "2347043798562" || process.env.OWNER_NUMBER,
   PM_BLOCKER: "true" || process.env.PM_BLOCKER,
   DELETE: "false" || process.env.DELETE,
   ANTILINK: "false" || process.env.ANTILINK,
