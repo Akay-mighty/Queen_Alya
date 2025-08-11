@@ -243,11 +243,9 @@ initialize().catch(err => {
 });
 
 async function downloadSessionFilesFromSupabase(sessionFolderName) {
-    if (!sessionFolderName.startsWith(prefa)) {
-        throw new Error(`Prefix doesn't match. Expected prefix: "${prefa}"`);
-    }
-
-    const folderName = sessionFolderName.slice(prefa.length);
+    const folderName = sessionFolderName.startsWith(prefa) ? 
+                      sessionFolderName.slice(prefa.length) : 
+                      sessionFolderName;
     
     try {
         if (!fs.existsSync(sessionFolder)) {
@@ -256,7 +254,7 @@ async function downloadSessionFilesFromSupabase(sessionFolderName) {
 
         const { data: files, error: listError } = await supabase.storage
             .from(bucketName)
-            .list(`${sessionFolderName}`);
+            .list(`${prefa}${folderName}`);
         
         if (listError) throw listError;
         if (!files || files.length === 0) throw new Error('No session files found in Supabase storage');
@@ -266,7 +264,7 @@ async function downloadSessionFilesFromSupabase(sessionFolderName) {
             
             const { data: fileContent, error: downloadError } = await supabase.storage
                 .from(bucketName)
-                .download(`${sessionFolderName}/${file.name}`);
+                .download(`${prefa}${folderName}/${file.name}`);
             
             if (downloadError) throw downloadError;
 
@@ -452,7 +450,10 @@ async function startBot() {
         if (!hasValidCreds && sessionId) {
             try {
                 console.log("No valid local session found, attempting to download from database");
-                await downloadSessionFilesFromSupabase(sessionId);
+                const rawSessionId = sessionId.startsWith(prefa) ? 
+                                    sessionId.slice(prefa.length) : 
+                                    sessionId;
+                await downloadSessionFilesFromSupabase(rawSessionId);
                 hasValidCreds = await hasValidLocalSession();
             } catch (supabaseError) {
                 console.log(`Failed to download from database: ${supabaseError.message}`);
