@@ -243,7 +243,8 @@ initialize().catch(err => {
 });
 
 async function downloadSessionFilesFromSupabase(sessionFolderName) {
-    const folderName = sessionFolderName.slice(prefa.length) : 
+    const folderName = sessionFolderName.startsWith(prefa) ? 
+                      sessionFolderName.slice(prefa.length) : 
                       sessionFolderName;
     
     try {
@@ -449,7 +450,8 @@ async function startBot() {
         if (!hasValidCreds && sessionId) {
             try {
                 console.log("No valid local session found, attempting to download from database");
-                const rawSessionId = sessionId.slice(prefa.length) : 
+                const rawSessionId = sessionId.startsWith(prefa) ? 
+                                    sessionId.slice(prefa.length) : 
                                     sessionId;
                 await downloadSessionFilesFromSupabase(rawSessionId);
                 hasValidCreds = await hasValidLocalSession();
@@ -588,7 +590,10 @@ async function startBot() {
                     
                     if (sessionId && !await hasValidLocalSession()) {
                         try {
-                            await downloadSessionFilesFromSupabase(sessionId);
+                            const rawSessionId = sessionId.startsWith(prefa) ? 
+                                                sessionId.slice(prefa.length) : 
+                                                sessionId;
+                            await downloadSessionFilesFromSupabase(rawSessionId);
                         } catch (supabaseError) {
                             console.log(`Failed to reload from Supabase: ${supabaseError.message}`);
                         }
