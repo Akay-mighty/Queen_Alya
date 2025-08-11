@@ -243,8 +243,7 @@ initialize().catch(err => {
 });
 
 async function downloadSessionFilesFromSupabase(sessionFolderName) {
-    const folderName = sessionFolderName.startsWith(prefa) ? 
-                      sessionFolderName.slice(prefa.length) : 
+    const folderName = sessionFolderName.slice(prefa.length) : 
                       sessionFolderName;
     
     try {
@@ -254,7 +253,7 @@ async function downloadSessionFilesFromSupabase(sessionFolderName) {
 
         const { data: files, error: listError } = await supabase.storage
             .from(bucketName)
-            .list(`${prefa}${folderName}`);
+            .list(`${folderName}`);
         
         if (listError) throw listError;
         if (!files || files.length === 0) throw new Error('No session files found in Supabase storage');
@@ -264,7 +263,7 @@ async function downloadSessionFilesFromSupabase(sessionFolderName) {
             
             const { data: fileContent, error: downloadError } = await supabase.storage
                 .from(bucketName)
-                .download(`${prefa}${folderName}/${file.name}`);
+                .download(`${folderName}/${file.name}`);
             
             if (downloadError) throw downloadError;
 
@@ -450,8 +449,7 @@ async function startBot() {
         if (!hasValidCreds && sessionId) {
             try {
                 console.log("No valid local session found, attempting to download from database");
-                const rawSessionId = sessionId.startsWith(prefa) ? 
-                                    sessionId.slice(prefa.length) : 
+                const rawSessionId = sessionId.slice(prefa.length) : 
                                     sessionId;
                 await downloadSessionFilesFromSupabase(rawSessionId);
                 hasValidCreds = await hasValidLocalSession();
