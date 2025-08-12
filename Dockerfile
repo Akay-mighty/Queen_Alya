@@ -1,13 +1,12 @@
-FROM node:20-alpine
+FROM node:21
+
+RUN if ! command -v ffmpeg >/dev/null 2>&1; then \
+  apt-get update && \
+  apt-get install -y ffmpeg && \
+  apt-get clean; \
+fi
 
 WORKDIR /app
-
-# Clone repo and install dependencies in one layer to reduce image size
-RUN apk add --no-cache git && \
-    git clone https://github.com/KING-DAVIDX/Queen_Alya.git . && \
-    npm install && \
-    npm cache clean --force && \
-    apk del git
-
-EXPOSE 3000
+COPY . .
+RUN npm install
 CMD ["npm", "start"]
