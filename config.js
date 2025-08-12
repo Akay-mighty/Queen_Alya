@@ -33,7 +33,7 @@ const config = {
   AUTO_STATUS: "true" || process.env.AUTO_STATUS,
   AUTO_STATUS_EMOJI: "👑" || process.env.AUTO_STATUS_EMOJI, 
   CHAT_BOT: "false" || process.env.CHAT_BOT,
-  AUTO_SAVE_STATUS: "true" || process.env.AUTO_SAVE_STATUS,
+  AUTO_SAVE_STATUS: "false" || process.env.AUTO_SAVE_STATUS,
   SAVE_STATUS_FROM: "" || process.env.SAVE_STATUS_FROM,
   MONGODB: "mongodb+srv://Alya:Alya2006@alya.wnpwwot.mongodb.net/?retryWrites=true&w=majority&appName=Alya" || process.env.MONGODB
 };
