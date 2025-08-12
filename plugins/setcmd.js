@@ -182,26 +182,24 @@ bot(
             const matchedCommand = stickerCommands.find(cmd => cmd.stickerId === stickerId);
             if (!matchedCommand) return;
             
+            const cleanedQuery = query.replace(new RegExp(matchedCommand.name, 'i'), '').trim();
             // Create command message
             const commandMessage = {
-                ...message,
-                raw: message.raw || message,
-                text: `${config.PREFIX}${matchedCommand.name}`,
-                content: `${config.PREFIX}${matchedCommand.name}`,
-                command: matchedCommand.name,
-                query: '',
-                args: [],
-                prefix: config.PREFIX,
-                shouldProcess: true,
-                shouldProcessCommand: true,
-                skipAlya: true,
-                isCommand: true,
-                fromMe: false,
-                isBot: false
-            };
-            
-            // Execute the command
-            await bot.plugins.system.handleMessage(commandMessage, bot);
+          ...message,
+          raw: message.raw || message, // Preserve original raw message
+          text: `${config.PREFIX}${matchedCommand.name} ${cleanedQuery}`,
+          content: `${config.PREFIX}${matchedCommand.name} ${cleanedQuery}`,
+          command: matchedCommand.name,
+          query: cleanedQuery,
+          args: cleanedQuery.split(' ').filter(arg => arg.trim() !== ''),
+          prefix: config.PREFIX,
+          shouldProcess: true,
+          shouldProcessCommand: true,
+          skipAlya: true // Prevent recursive processing
+        };
+        
+        // Use the plugin system's handleMessage method instead of direct access
+        await plugins.system.handleMessage(commandMessage, bot);
             
         } catch (error) {
             console.error('Error in sticker command listener:', error);
