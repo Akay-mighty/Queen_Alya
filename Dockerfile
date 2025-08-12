@@ -1,16 +1,13 @@
-FROM node:20
+FROM node:20-alpine
 
-RUN git clone https://github.com/KING-DAVIDX/Queen_Alya.git /root/Queen_Alya
+WORKDIR /app
 
-# Clear npm cache and remove node_modules directories
-RUN npm cache clean --force
-RUN rm -rf /root/Queen_Alya/node_modules
+# Clone repo and install dependencies in one layer to reduce image size
+RUN apk add --no-cache git && \
+    git clone https://github.com/KING-DAVIDX/Queen_Alya.git . && \
+    npm install && \
+    npm cache clean --force && \
+    apk del git
 
-# Install dependencies
-WORKDIR /root/Queen_Alya
-RUN npm install
-
-# Add additional Steps To Run...
 EXPOSE 3000
-CMD ["npm","start" ]
-# IF YOU ARE MODIFYING THIS BOT DONT CHANGE THIS  RUN rm -rf /root/Queen_Alya/node_modules
+CMD ["npm", "start"]
