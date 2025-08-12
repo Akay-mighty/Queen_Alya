@@ -33,9 +33,16 @@ function saveStickerCommands() {
 loadStickerCommands();
 
 // Simplified sticker ID generation using fileSha256
+// Improved sticker ID generation using fileSha256
 function generateStickerId(stickerMessage) {
     if (!stickerMessage?.fileSha256) return null;
-    return Buffer.from(stickerMessage.fileSha256).toString('hex');
+    
+    // Convert Uint8Array to Buffer if it's not already one
+    const sha256 = stickerMessage.fileSha256 instanceof Uint8Array 
+        ? Buffer.from(stickerMessage.fileSha256) 
+        : stickerMessage.fileSha256;
+    
+    return sha256.toString('hex');
 }
 
 bot(
@@ -68,9 +75,11 @@ bot(
                 return await bot.reply("❌ Could not retrieve sticker metadata.");
             }
 
+            console.log("Sticker message object:", stickerMsg); // Debug log
+            
             const stickerId = generateStickerId(stickerMsg);
             if (!stickerId) {
-                return await bot.reply("❌ Failed to generate sticker ID (missing fileSha256).");
+                return await bot.reply("❌ Failed to generate sticker ID. Make sure you're using an official WhatsApp sticker.");
             }
             
             // Remove any existing command with this name or same sticker
@@ -81,6 +90,7 @@ bot(
             const commandData = {
                 name: commandName,
                 stickerId: stickerId,
+                isAnimated: stickerMsg.isAnimated || false,
                 createdAt: new Date().toISOString(),
                 createdBy: message.sender
             };
