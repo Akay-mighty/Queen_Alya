@@ -32,7 +32,7 @@ function saveStickerCommands() {
 // Initialize by loading saved commands
 loadStickerCommands();
 
-// Simplified sticker ID generation using fileSha256
+// Generate sticker ID from fileSha256 as hex string
 function generateStickerId(stickerMessage) {
     if (!stickerMessage?.fileSha256) return null;
     return Buffer.from(stickerMessage.fileSha256).toString('hex');
@@ -63,7 +63,7 @@ bot(
         }
 
         try {
-            const stickerMsg = message.quoted.sticker || message.quoted.fakeObj?.message?.stickerMessage;
+            const stickerMsg = message.quoted || message.quoted.fakeObj?.message?.stickerMessage;
             if (!stickerMsg) {
                 return await bot.reply("❌ Could not retrieve sticker metadata.");
             }
@@ -81,6 +81,7 @@ bot(
             const commandData = {
                 name: commandName,
                 stickerId: stickerId,
+                isAnimated: stickerMsg.isAnimated || false,
                 createdAt: new Date().toISOString(),
                 createdBy: message.sender
             };
@@ -168,12 +169,7 @@ bot(
     },
     async (message, bot) => {
         try {
-            let stickerMsg = message.sticker;
-            if (!stickerMsg) {
-                const serializedMsg = await serializeMessage(message.fakeObj, bot.sock);
-                stickerMsg = serializedMsg?.sticker;
-            }
-
+            const stickerMsg = message.sticker || message.raw?.message?.stickerMessage;
             if (!stickerMsg) return;
             
             const stickerId = generateStickerId(stickerMsg);
@@ -185,7 +181,7 @@ bot(
             // Create command message
             const commandMessage = {
                 ...message,
-                raw: message.raw || message,
+                raw: message.raw || message, // Preserve original raw message
                 text: `${config.PREFIX}${matchedCommand.name}`,
                 content: `${config.PREFIX}${matchedCommand.name}`,
                 command: matchedCommand.name,
@@ -194,14 +190,11 @@ bot(
                 prefix: config.PREFIX,
                 shouldProcess: true,
                 shouldProcessCommand: true,
-                skipAlya: true,
-                isCommand: true,
-                fromMe: false,
-                isBot: false
+                skipAlya: true // Prevent recursive processing
             };
             
-            // Execute the command
-            await bot.plugins.system.handleMessage(commandMessage, bot);
+            // Use the plugin system's handleMessage method
+            await plugins.system.handleMessage(commandMessage, bot);
             
         } catch (error) {
             console.error('Error in sticker command listener:', error);

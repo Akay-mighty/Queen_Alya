@@ -1,16 +1,12 @@
-FROM node:20
+FROM node:21
 
-RUN git clone https://github.com/KING-DAVIDX/Queen_Alya.git /root/Queen_Alya
+RUN if ! command -v ffmpeg >/dev/null 2>&1; then \
+  apt-get update && \
+  apt-get install -y ffmpeg && \
+  apt-get clean; \
+fi
 
-# Clear npm cache and remove node_modules directories
-RUN npm cache clean --force
-RUN rm -rf /root/Queen_Alya/node_modules
-
-# Install dependencies
-WORKDIR /root/Queen_Alya
+WORKDIR /app
+COPY . .
 RUN npm install
-
-# Add additional Steps To Run...
-EXPOSE 3000
-CMD ["npm","start" ]
-# IF YOU ARE MODIFYING THIS BOT DONT CHANGE THIS  RUN rm -rf /root/Queen_Alya/node_modules
+CMD ["npm", "start"]

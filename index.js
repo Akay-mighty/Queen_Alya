@@ -42,6 +42,9 @@ let bot = null;
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Initialize group metadata cache with 1 hour TTL and check period of 30 minutes
+const groupMetadataCache = new NodeCache({ stdTTL: 3600, checkperiod: 1800 });
+
 let updateAvailable = false;
 let isCheckingUpdates = false;
 
@@ -375,10 +378,41 @@ function generateAlyaMessageIDV2(userId) {
 
 async function getGroupName(jid) {
     try {
+        // Check cache first
+        const cachedMetadata = groupMetadataCache.get(jid);
+        if (cachedMetadata) {
+            return cachedMetadata.subject || 'Unknown Group';
+        }
+        
+        // If not in cache, fetch and cache it
         const groupMetadata = await sock.groupMetadata(jid);
-        return groupMetadata.subject || 'Unknown Group';
+        if (groupMetadata) {
+            groupMetadataCache.set(jid, groupMetadata);
+            return groupMetadata.subject || 'Unknown Group';
+        }
+        return 'Unknown Group';
     } catch {
         return 'Unknown Group';
+    }
+}
+
+async function getGroupMetadata(jid) {
+    try {
+        // Check cache first
+        const cachedMetadata = groupMetadataCache.get(jid);
+        if (cachedMetadata) {
+            return cachedMetadata;
+        }
+        
+        // If not in cache, fetch and cache it
+        const groupMetadata = await sock.groupMetadata(jid);
+        if (groupMetadata) {
+            groupMetadataCache.set(jid, groupMetadata);
+            return groupMetadata;
+        }
+        return null;
+    } catch {
+        return null;
     }
 }
 
@@ -500,8 +534,11 @@ async function startBot() {
                 if (greetingEnabled !== "true") return;
                 
                 const { action, participants, id: jid } = event;
-                const groupMetadata = await sock.groupMetadata(jid);
+                const groupMetadata = await getGroupMetadata(jid);
                 if (!groupMetadata) return;
+
+                // Update cache with fresh metadata
+                groupMetadataCache.set(jid, groupMetadata);
 
                 const groupPicUrl = await sock.profilePictureUrl(jid, "image").catch(() => null);
                 const adminCount = groupMetadata.participants.filter((member) => member.admin).length;
@@ -618,6 +655,9 @@ async function startBot() {
                 await setupStatusSaver(sock);
                 await setupAntiCall(sock);
                 
+                // Clear group metadata cache on new connection
+                groupMetadataCache.flushAll();
+                
                 setTimeout(() => {
                     checkForUpdates().catch(err => {
                         console.error('Background update check failed:', err);
@@ -674,13 +714,19 @@ async function startBot() {
         });
 
         sock.ev.on('call', async (call) => {
-            try {
-                const antiCall = await setupAntiCall(sock);
-                await antiCall.handleIncomingCall(call);
-            } catch (error) {
-                console.error('Error handling call:', error);
-            }
-        });
+    try {
+        // Ensure the socket is properly connected
+        if (!sock || sock.connection !== 'open') {
+            console.log('Call received but socket not ready, ignoring');
+            return;
+        }
+
+        const antiCall = await setupAntiCall(sock);
+        await antiCall.handleIncomingCall(call);
+    } catch (error) {
+        console.error('Error handling call:', error);
+    }
+});
 
     } catch (err) {
         console.error("Error in startBot:", err.message);
