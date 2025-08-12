@@ -32,7 +32,6 @@ function saveStickerCommands() {
 // Initialize by loading saved commands
 loadStickerCommands();
 
-// Simplified sticker ID generation using fileSha256
 // Improved sticker ID generation using fileSha256
 function generateStickerId(stickerMessage) {
     if (!stickerMessage?.fileSha256) return null;
@@ -70,7 +69,11 @@ bot(
         }
 
         try {
-            const stickerMsg = message.quoted.sticker || message.quoted.fakeObj?.message?.stickerMessage;
+            // Get the sticker message from the quoted message
+            const stickerMsg = message.quoted.sticker || 
+                               (message.quoted.fakeObj?.message?.stickerMessage || 
+                                message.quoted.raw?.message?.stickerMessage);
+
             if (!stickerMsg) {
                 return await bot.reply("❌ Could not retrieve sticker metadata.");
             }
@@ -107,7 +110,6 @@ bot(
     }
 );
 
-// 2. Delcmd - Delete a sticker command
 bot(
     {
         name: "delcmd",
