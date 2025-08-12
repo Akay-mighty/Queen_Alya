@@ -5,14 +5,14 @@ const fs = require('fs');
 const path = require('path');
 const { resolveLidToJid } = require("../lib/serialize");
 
-// Level system state
+
 const levelState = {
     configFile: path.join(__dirname, '..', 'config.js'),
     levelSystemEnabled: config.LEVEL_UP === "true",
     mongoConnected: false
 };
 
-// File watcher to reload config changes
+
 fs.watch(levelState.configFile, (eventType, filename) => {
     if (eventType === 'change') {
         try {
@@ -27,7 +27,7 @@ fs.watch(levelState.configFile, (eventType, filename) => {
     }
 });
 
-// Function to update config
+
 function updateConfig(newValues) {
     try {
         const config = require(levelState.configFile);
@@ -44,21 +44,20 @@ function updateConfig(newValues) {
     }
 }
 
-// Mongoose schema for user levels
 const userLevelSchema = new mongoose.Schema({
-    userId: { type: String, required: true, unique: true },
+    userId: { type: String, required: true },
     chatId: { type: String, required: true },
     xp: { type: Number, default: 0 },
     level: { type: Number, default: 0 },
     lastMessageCount: { type: Number, default: 0 }
 }, { timestamps: true });
 
-// Create compound index for faster queries
-userLevelSchema.index({ userId: 1, chatId: 1 }, { unique: true });
+
+userLevelSchema.index({ userId: 1, chatId: 1 });
 
 const UserLevel = mongoose.models.UserLevel || mongoose.model('UserLevel', userLevelSchema);
 
-// Initialize MongoDB connection if configured
+
 async function initializeMongoDB() {
     if (!config.MONGODB) {
         console.error('MongoDB connection URL not configured. Level system will not work properly.');
@@ -78,7 +77,7 @@ async function initializeMongoDB() {
 
 initializeMongoDB();
 
-// Level roles mapping
+
 const LEVEL_ROLES = {
     1: "👨│Citizen",
     2: "👼Baby Wizard",
@@ -107,7 +106,6 @@ const LEVEL_ROLES = {
     40: "GOD🫰"
 };
 
-// Helper function to get role based on level
 function getRole(level) {
     level = Number(level);
     if (level === 0) return "Newbie";
@@ -125,7 +123,6 @@ function getRole(level) {
     return "GOD🫰";
 }
 
-// Get user info using resolveLidToJid and store.getname
 async function getUserInfo(sock, userId) {
     try {
         const jid = await resolveLidToJid(sock, userId);
@@ -137,14 +134,13 @@ async function getUserInfo(sock, userId) {
         return { jid, name };
     } catch (error) {
         console.error('Error getting user info:', error);
-        throw error; // We want to handle this in the calling functions
+        throw error;
     }
 }
 
-// Calculate XP based on message count (5 XP per message)
 async function calculateXP(sock, userId, chatId) {
     try {
-        if (!chatId.endsWith('@g.us')) return 0; // Only work in groups
+        if (!chatId.endsWith('@g.us')) return 0;
         
         const { jid } = await getUserInfo(sock, userId);
         const chatHistory = await store.getChatHistory(chatId);
@@ -175,25 +171,30 @@ async function calculateXP(sock, userId, chatId) {
                 messageCount++;
             }
         }
-        return messageCount * 5; // 5 XP per message
+        return messageCount * 5;
     } catch (error) {
         console.error('Error calculating XP:', error);
         return 0;
     }
 }
 
-// Update or create user level
 async function updateUserLevel(userId, chatId, xp) {
     try {
-        if (!chatId.endsWith('@g.us')) return null; // Only work in groups
+        if (!chatId.endsWith('@g.us')) return null;
         
-        const level = Math.floor(xp / 100); // 100 XP per level (20 messages)
+        const level = Math.floor(xp / 100);
         
-        const userLevel = await UserLevel.findOneAndUpdate(
-            { userId, chatId },
-            { $set: { xp, level, lastMessageCount: xp } },
-            { upsert: true, new: true }
-        );
+        let userLevel = await UserLevel.findOne({ userId, chatId });
+        
+        if (!userLevel) {
+            userLevel = new UserLevel({ userId, chatId, xp, level, lastMessageCount: xp });
+            await userLevel.save();
+        } else {
+            userLevel.xp = xp;
+            userLevel.level = level;
+            userLevel.lastMessageCount = xp;
+            await userLevel.save();
+        }
         
         return userLevel;
     } catch (error) {
@@ -202,10 +203,9 @@ async function updateUserLevel(userId, chatId, xp) {
     }
 }
 
-// Get user level
 async function getUserLevel(userId, chatId) {
     try {
-        if (!chatId.endsWith('@g.us')) return null; // Only work in groups
+        if (!chatId.endsWith('@g.us')) return null;
         
         const userLevel = await UserLevel.findOne({ userId, chatId });
         return userLevel || { xp: 0, level: 0, lastMessageCount: 0 };
@@ -215,10 +215,9 @@ async function getUserLevel(userId, chatId) {
     }
 }
 
-// Get leaderboard for a chat
 async function getLeaderboard(chatId, limit = 5) {
     try {
-        if (!chatId.endsWith('@g.us')) return []; // Only work in groups
+        if (!chatId.endsWith('@g.us')) return [];
         
         const leaderboard = await UserLevel.find({ chatId })
             .sort({ xp: -1 })
@@ -231,7 +230,6 @@ async function getLeaderboard(chatId, limit = 5) {
     }
 }
 
-// Get group metadata
 async function getGroupMetadata(sock, groupJid) {
     try {
         const metadata = await sock.groupMetadata(groupJid);
