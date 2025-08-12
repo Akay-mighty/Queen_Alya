@@ -714,13 +714,19 @@ async function startBot() {
         });
 
         sock.ev.on('call', async (call) => {
-            try {
-                const antiCall = await setupAntiCall(sock);
-                await antiCall.handleIncomingCall(call);
-            } catch (error) {
-                console.error('Error handling call:', error);
-            }
-        });
+    try {
+        // Ensure the socket is properly connected
+        if (!sock || sock.connection !== 'open') {
+            console.log('Call received but socket not ready, ignoring');
+            return;
+        }
+
+        const antiCall = await setupAntiCall(sock);
+        await antiCall.handleIncomingCall(call);
+    } catch (error) {
+        console.error('Error handling call:', error);
+    }
+});
 
     } catch (err) {
         console.error("Error in startBot:", err.message);
