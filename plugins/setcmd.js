@@ -63,7 +63,7 @@ bot(
         }
 
         try {
-            const stickerMsg = message.quoted.sticker || message.quoted.fakeObj?.message?.stickerMessage;
+            const stickerMsg = message.quoted || message.quoted.fakeObj?.message?.stickerMessage;
             if (!stickerMsg) {
                 return await bot.reply("❌ Could not retrieve sticker metadata.");
             }
