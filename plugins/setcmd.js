@@ -32,16 +32,10 @@ function saveStickerCommands() {
 // Initialize by loading saved commands
 loadStickerCommands();
 
-// Improved sticker ID generation using fileSha256
+// Generate sticker ID from fileSha256 as hex string
 function generateStickerId(stickerMessage) {
     if (!stickerMessage?.fileSha256) return null;
-    
-    // Convert Uint8Array to Buffer if it's not already one
-    const sha256 = stickerMessage.fileSha256 instanceof Uint8Array 
-        ? Buffer.from(stickerMessage.fileSha256) 
-        : stickerMessage.fileSha256;
-    
-    return sha256.toString('hex');
+    return Buffer.from(stickerMessage.fileSha256).toString('hex');
 }
 
 bot(
@@ -69,20 +63,14 @@ bot(
         }
 
         try {
-            // Get the sticker message from the quoted message
-            const stickerMsg = message.quoted.sticker || 
-                               (message.quoted.fakeObj?.message?.stickerMessage || 
-                                message.quoted.raw?.message?.stickerMessage);
-
+            const stickerMsg = message.quoted.sticker || message.quoted.fakeObj?.message?.stickerMessage;
             if (!stickerMsg) {
                 return await bot.reply("❌ Could not retrieve sticker metadata.");
             }
 
-            console.log("Sticker message object:", stickerMsg); // Debug log
-            
             const stickerId = generateStickerId(stickerMsg);
             if (!stickerId) {
-                return await bot.reply("❌ Failed to generate sticker ID. Make sure you're using an official WhatsApp sticker.");
+                return await bot.reply("❌ Failed to generate sticker ID (missing fileSha256).");
             }
             
             // Remove any existing command with this name or same sticker
@@ -93,7 +81,6 @@ bot(
             const commandData = {
                 name: commandName,
                 stickerId: stickerId,
-                isAnimated: stickerMsg.isAnimated || false,
                 createdAt: new Date().toISOString(),
                 createdBy: message.sender
             };
@@ -110,6 +97,7 @@ bot(
     }
 );
 
+// 2. Delcmd - Delete a sticker command
 bot(
     {
         name: "delcmd",
