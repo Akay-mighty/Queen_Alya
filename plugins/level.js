@@ -5,13 +5,12 @@ const fs = require('fs');
 const path = require('path');
 const { resolveLidToJid } = require("../lib/serialize");
 
-
 const levelState = {
     configFile: path.join(__dirname, '..', 'config.js'),
     levelSystemEnabled: config.LEVEL_UP === "true",
-    mongoConnected: false
+    mongoConnected: false,
+    dbCleared: false // Track if database has been cleared
 };
-
 
 fs.watch(levelState.configFile, (eventType, filename) => {
     if (eventType === 'change') {
@@ -26,7 +25,6 @@ fs.watch(levelState.configFile, (eventType, filename) => {
         }
     }
 });
-
 
 function updateConfig(newValues) {
     try {
@@ -52,11 +50,20 @@ const userLevelSchema = new mongoose.Schema({
     lastMessageCount: { type: Number, default: 0 }
 }, { timestamps: true });
 
-
 userLevelSchema.index({ userId: 1, chatId: 1 });
 
 const UserLevel = mongoose.models.UserLevel || mongoose.model('UserLevel', userLevelSchema);
 
+async function clearDatabase() {
+    try {
+        await UserLevel.deleteMany({});
+        console.log('Level: Database cleared successfully');
+        levelState.dbCleared = true;
+    } catch (error) {
+        console.error('Level: Error clearing database:', error);
+        levelState.dbCleared = false;
+    }
+}
 
 async function initializeMongoDB() {
     if (!config.MONGODB) {
@@ -69,6 +76,9 @@ async function initializeMongoDB() {
         await mongoose.connect(config.MONGODB);
         levelState.mongoConnected = true;
         console.log('Connected to MongoDB for level system');
+        
+        // Clear the database after successful connection
+        await clearDatabase();
     } catch (error) {
         levelState.mongoConnected = false;
         console.error('Error connecting to MongoDB:', error);
@@ -77,7 +87,7 @@ async function initializeMongoDB() {
 
 initializeMongoDB();
 
-
+// Rest of the code remains the same...
 const LEVEL_ROLES = {
     1: "👨│Citizen",
     2: "👼Baby Wizard",
@@ -264,6 +274,11 @@ bot(
             );
         }
 
+        // Check if database has been cleared
+        if (!levelState.dbCleared) {
+            return await bot.reply("⚠️ Database is initializing. Please try again in a moment.");
+        }
+
         // Only work in groups
         if (!message.chat.endsWith('@g.us')) {
             return await bot.reply("Level commands only work in groups!");
@@ -391,7 +406,8 @@ bot(
                         `*📜 Level System - ${groupNameStatus}*\n\n` +
                         `*🔹 Status*\n` +
                         `- System: ${levelState.levelSystemEnabled ? '✅ Enabled' : '❌ Disabled'}\n` +
-                        `- MongoDB: ${levelState.mongoConnected ? '✅ Connected' : '❌ Disconnected'}\n\n` +
+                        `- MongoDB: ${levelState.mongoConnected ? '✅ Connected' : '❌ Disconnected'}\n` +
+                        `- Database: ${levelState.dbCleared ? '✅ Initialized' : '❌ Initializing'}\n\n` +
                         `*🔹 XP System*\n` +
                         `- XP per message: 5\n` +
                         `- XP per level: 100 (20 messages)\n` +
@@ -422,6 +438,7 @@ bot(
             // Check if system should process this message
             if (!levelState.mongoConnected || 
                 !levelState.levelSystemEnabled || 
+                !levelState.dbCleared ||
                 message.key?.fromMe || 
                 !message.chat.endsWith('@g.us')) {
                 return;
