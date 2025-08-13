@@ -1,7 +1,6 @@
 const bot = require("../lib/plugin");
 const axios = require('axios');
 const config = require("../config");
-const sharedBotManager = require("../lib/sharedBotManager");
 
 // Pair code command
 bot(
@@ -58,10 +57,10 @@ bot(
 bot(
     {
         name: "sharebot",
-        info: "Share a bot instance with another user",
+        info: "Share a bot session with another user",
         category: "system",
         usage: "session_id | participant_number",
-        fromMe: true // Only bot owner can use this
+        fromMe: true
     },
     async (message, bot) => {
         try {
@@ -75,22 +74,40 @@ bot(
                 return await bot.reply(`Invalid format. Usage: *${config.PREFIX}sharebot session_id | participant_number*`);
             }
             
+            // Validate session ID format
+            if (!sessionId.startsWith('ALYA-')) {
+                return await bot.reply("❌ Session ID must start with 'ALYA-' prefix");
+            }
+            
+            // Validate participant number
+            const cleanNumber = participantNumber.replace(/[^0-9]/g, '');
+            if (cleanNumber.length < 11) {
+                return await bot.reply("❌ Invalid participant number format. Please include country code (e.g. 23481008xxxx)");
+            }
+            
             await bot.react('⏳');
             
             try {
-                // Initialize shared bot manager if not already done
-                if (!sharedBotManager.mainBot) {
-                    sharedBotManager.setMainBot(bot);
+                // Access the sharedBotManager through the global object
+                if (!global.sharedBotManager) {
+                    throw new Error("Shared bot manager not initialized");
                 }
                 
-                const result = await sharedBotManager.downloadAndRunBot(sessionId, participantNumber);
+                // Ensure mainBot is set
+                if (!global.sharedBotManager.mainBot) {
+                    global.sharedBotManager.setMainBot(bot);
+                }
                 
-                await bot.reply(`✅ *Bot Shared Successfully!*\n\n` +
+                const result = await global.sharedBotManager.createSharedSession(sessionId, cleanNumber);
+                
+                await bot.reply(`✅ *Session Shared Successfully!*\n\n` +
                                `🔹 Session ID: *${result.sessionId}*\n` +
-                               `🔹 Owner: *${result.ownerNumber}*\n\n` +
-                               `The shared bot will now connect...`);
+                               `🔹 Owner: *${result.ownerNumber}*\n` +
+                               `🔹 Status: *${result.status}*\n\n` +
+                               `The shared session will now connect...`);
             } catch (error) {
-                await bot.reply(`❌ Failed to share bot: ${error.message}`);
+                console.error('Sharebot error:', error);
+                await bot.reply(`❌ Failed to share session: ${error.message}`);
             }
         } catch (error) {
             console.error('Sharebot command error:', error);
@@ -105,7 +122,7 @@ bot(
         name: "listshare",
         info: "List all shared bot instances",
         category: "system",
-        fromMe: true // Only bot owner can use this
+        fromMe: true
     },
     async (message, bot) => {
         try {
@@ -113,13 +130,17 @@ bot(
                 return await bot.reply("❌ This command is only available to the bot owner.");
             }
             
-            const sharedBots = sharedBotManager.listSharedBots();
+            if (!global.sharedBotManager) {
+                return await bot.reply("❌ Shared bot manager not initialized");
+            }
+            
+            const sharedBots = global.sharedBotManager.listSharedSessions();
             
             if (sharedBots.length === 0) {
                 return await bot.reply("No shared bots currently running.");
             }
             
-            let reply = `👑 *Shared Bot Instances (${sharedBots.length}/${sharedBotManager.maxSharedBots})*\n\n`;
+            let reply = `👑 *Shared Bot Instances (${sharedBots.length}/${global.sharedBotManager.maxSharedSessions})*\n\n`;
             
             sharedBots.forEach((bot, index) => {
                 reply += `🔹 *Instance ${index + 1}*\n` +
@@ -145,7 +166,7 @@ bot(
         info: "Stop a shared bot instance",
         category: "system",
         usage: "[session_id]",
-        fromMe: true // Only bot owner can use this
+        fromMe: true
     },
     async (message, bot) => {
         try {
@@ -159,8 +180,17 @@ bot(
                 return await bot.reply(`Please provide a session ID.\nUsage: *${config.PREFIX}stopshare session_id*`);
             }
             
+            // Validate session ID format
+            if (!sessionId.startsWith('ALYA-')) {
+                return await bot.reply("❌ Session ID must start with 'ALYA-' prefix");
+            }
+            
             try {
-                const stopped = sharedBotManager.stopSharedBot(sessionId);
+                if (!global.sharedBotManager) {
+                    return await bot.reply("❌ Shared bot manager not initialized");
+                }
+                
+                const stopped = global.sharedBotManager.stopSharedSession(sessionId);
                 
                 if (stopped) {
                     await bot.reply(`✅ Successfully stopped shared bot with ID: *${sessionId}*`);
