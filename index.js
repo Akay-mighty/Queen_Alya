@@ -7,6 +7,8 @@ const path = require("path");
 const config = require("./config");
 const { serializeMessage, smsg } = require("./lib/serialize");
 const { loadPlugins, system: pluginSystem } = require("./lib/plugin");
+const { SharedBotManager } = require('./lib/sharedBotManager');
+const sharedBotManager = new SharedBotManager(pluginSystem);
 const WhatsAppBot = require("./lib/message");
 const { setupAntidelete } = require("./lib/antidelete");
 const crypto = require('crypto');
@@ -17,7 +19,7 @@ const { setupAntiCall, cleanupAntiCall } = require("./lib/anticall");
 const { fileWatcher } = require('./lib/file');
 const { initialize } = require('./lib/render');
 const { createClient } = require('@supabase/supabase-js');
-
+global.sharedBotManager = new SharedBotManager(pluginSystem);
 const prefa = "ALYA-";
 const sessionFolder = path.join(__dirname, "session");
 const { initializeStore, getStore } = require("./lib/store");
@@ -56,6 +58,8 @@ const EXCLUDED_FILES = [
     'lib/store.db',
     'lib/store.db-shm',
     'lib/store.db-wal',
+    '.npm',
+    '.pm2',
     'node_modules'
 ];
 
@@ -526,7 +530,7 @@ async function startBot() {
 
         bot = new WhatsAppBot(sock);
         global.bot = bot;
-
+        sharedBotManager.setMainBot(bot);
         sock.ev.on("creds.update", saveCreds);
 
         sock.ev.on('group-participants.update', async (event) => {
